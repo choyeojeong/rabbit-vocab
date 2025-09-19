@@ -30,6 +30,10 @@ const styles = {
   tagWrong: { display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: '#ffe3ea', color: '#b00020', fontSize: 12, marginLeft: 6 },
   btnRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 },
   speakerBtn: { border: '1px solid #ffd0e1', background: '#fff5f8', borderRadius: 12, padding: '8px 10px', cursor: 'pointer' },
+
+  // sound unlock bar
+  unlockBar: { background:'#fff0f5', border:'1px dashed #ff9fc0', padding:'10px 12px', borderRadius:12, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:12 },
+  unlockBtn: { padding:'8px 12px', borderRadius:10, border:'1px solid #ff9fc0', background:'#ffeff6', fontWeight:700, cursor:'pointer' },
 };
 
 function useQuery() {
@@ -69,6 +73,11 @@ export default function PracticeMCQ() {
   const [chosen, setChosen] = useState(-1);
   const [score, setScore] = useState(0);
   const [wrongs, setWrongs] = useState([]);
+
+  // 🔊 모바일 오디오 unlock 상태
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    return localStorage.getItem('sound_enabled') === 'true';
+  });
 
   const current = words[i];
   const me = getSession();
@@ -125,12 +134,13 @@ export default function PracticeMCQ() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [i, current, allPool]);
 
-  // 문제 변경 시 자동 발음
+  // 문제 변경 시 자동 발음 (🔊 soundEnabled 일 때만)
   useEffect(() => {
     if (!current?.term_en) return;
+    if (!soundEnabled) return; // 모바일 자동재생 차단 회피: unlock 전에는 발음 X
     speakWord(current.term_en);
     return () => speakCancel();
-  }, [current?.id]);
+  }, [current?.id, soundEnabled]);
 
   // 정오 저장
   async function record(action) {
@@ -150,7 +160,7 @@ export default function PracticeMCQ() {
     }
   }
 
-  // 보기 클릭: 더 이상 발음하지 않음
+  // 보기 클릭: 보기 선택 시에는 발음하지 않음(요청 사항 유지)
   async function choose(idx) {
     if (chosen >= 0 || phase !== 'play') return;
     setChosen(idx);
@@ -171,12 +181,61 @@ export default function PracticeMCQ() {
     setI((x) => x + 1);
   }
 
+  // 🔊 오디오 잠금 해제 (모바일 정책 대응)
+  async function enableSoundOnce() {
+    try {
+      // 1) Speech API 깨우기
+      try {
+        window.speechSynthesis?.resume?.();
+      } catch {}
+      try {
+        // iOS에서 종종 첫 제스처 내 cancel이 효과적
+        window.speechSynthesis?.cancel?.();
+      } catch {}
+
+      // 2) AudioContext 깨우기 (브라우저별 보조)
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) {
+          const ctx = new Ctx();
+          if (ctx.state === 'suspended') await ctx.resume();
+          // 아주 짧은 무음 버퍼 재생 (일부 환경에서 필요)
+          const buffer = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buffer;
+          src.connect(ctx.destination);
+          src.start(0);
+        }
+      } catch {}
+
+      setSoundEnabled(true);
+      localStorage.setItem('sound_enabled', 'true');
+
+      // 즉시 현재 단어 한 번 발음(요청 느낌 좋게)
+      if (current?.term_en) speakWord(current.term_en);
+    } catch (e) {
+      console.warn('enableSoundOnce fail', e);
+    }
+  }
+
   if (!book) return <div style={styles.page}><div style={styles.box}>잘못된 접근입니다.</div></div>;
   if (!words.length) return <div style={styles.page}><div style={styles.box}>선택한 범위에 단어가 없어요.</div></div>;
 
   return (
     <div style={styles.page}>
       <div style={styles.box}>
+        {/* 🔊 소리 켜기(한번) 안내 바: unlock 전 1회 노출 */}
+        {!soundEnabled && (
+          <div style={styles.unlockBar} role="region" aria-label="소리 사용 안내">
+            <div style={{fontSize:13, color:'#444'}}>
+              모바일에서는 자동재생이 차단될 수 있어요. <b>소리 켜기</b>를 한 번 눌러주세요.
+            </div>
+            <button type="button" onClick={enableSoundOnce} style={styles.unlockBtn}>
+              🔊 소리 켜기(한번)
+            </button>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <h1 style={styles.title}>객관식 연습</h1>
           <div style={styles.info}>
