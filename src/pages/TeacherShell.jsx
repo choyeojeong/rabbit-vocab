@@ -5,10 +5,11 @@ import { Navigate, Outlet, Link, useLocation, useNavigate } from "react-router-d
 const PASS = import.meta.env.VITE_TEACHER_PASS || "RABBIT";
 
 /**
- * 교사용 모든 하위 라우트를 감싸는 게이트 레이아웃
- * - 비번 미인증: 비번 폼
- * - 비번 통과 "직후": 어떤 경로로 들어왔든 /teacher/home 으로 보냄
- * - 이미 인증 상태에서 내비게이션: 자식 라우트 그대로 사용
+ * 교사용 모든 하위 라우트를 감싸는 게이트 + 레이아웃 쉘
+ * - 미인증: 비번 폼 표시
+ * - 인증 직후: 어떤 경로로 들어왔든 /teacher/home 으로 1회 이동
+ * - 인증 상태: 데스크톱 최적화 레이아웃(.teacher-page/.teacher-shell) 안에 <Outlet/> 렌더
+ *   → responsive.css의 .teacher-* 스타일이 적용되어 PC 화면에 딱 맞게 표시됩니다.
  */
 export default function TeacherShell() {
   const [ok, setOk] = useState(false);
@@ -26,7 +27,7 @@ export default function TeacherShell() {
   }, []);
 
   useEffect(() => {
-    // 비번 통과 "직후" 한 번만 홈으로 강제 이동
+    // 비번 통과 직후 한 번만 홈으로 강제 이동
     if (ok && justUnlocked) {
       setJustUnlocked(false);
       navigate("/teacher/home", { replace: true });
@@ -38,7 +39,7 @@ export default function TeacherShell() {
     if (p === PASS) {
       localStorage.setItem("teacher_ok", "1");
       setOk(true);
-      setJustUnlocked(true); // ← 통과 직후 홈으로 보내기 트리거
+      setJustUnlocked(true);
     } else {
       alert("비밀번호가 올바르지 않습니다.");
     }
@@ -49,22 +50,45 @@ export default function TeacherShell() {
   // 미인증: 비번 폼
   if (!ok) {
     return (
-      <div style={styles.page}>
-        <div style={styles.box}>
-          <h1 style={styles.title}>교사용 페이지</h1>
-          <p style={{color:"#555",marginBottom:12}}>교사용 비밀번호를 입력하세요.</p>
-          <form onSubmit={submit} style={{display:"flex",gap:8}}>
-            <input
-              type="password"
-              value={p}
-              onChange={(e)=>setP(e.target.value)}
-              placeholder="Teacher Password"
-              style={styles.input}
-            />
-            <button type="submit" style={styles.btn}>입장</button>
-          </form>
-          <div style={{marginTop:12}}>
-            <Link to="/" style={{fontSize:13,color:"#777"}}>← 로그인으로</Link>
+      <div className="page teacher-page" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div className="teacher-shell" style={{ width: "100%", maxWidth: 560 }}>
+          <div className="teacher-card" style={{ padding: 24 }}>
+            <h1 className="page-title" style={{ marginTop: 0 }}>교사용 페이지</h1>
+            <p className="teacher-text" style={{ color: "#555", marginBottom: 12 }}>
+              교사용 비밀번호를 입력하세요.
+            </p>
+            <form onSubmit={submit} style={{ display: "flex", gap: 8 }}>
+              <input
+                type="password"
+                value={p}
+                onChange={(e) => setP(e.target.value)}
+                placeholder="Teacher Password"
+                style={{
+                  flex: 1,
+                  padding: "10px 12px",
+                  border: "1px solid #e8a9bf",
+                  borderRadius: 8,
+                  fontSize: 14,
+                }}
+              />
+              <button
+                type="submit"
+                style={{
+                  background: "#ff6fa3",
+                  color: "#fff",
+                  border: "none",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                입장
+              </button>
+            </form>
+            <div style={{ marginTop: 12 }}>
+              <Link to="/" style={{ fontSize: 13, color: "#777" }}>← 로그인으로</Link>
+            </div>
           </div>
         </div>
       </div>
@@ -76,14 +100,24 @@ export default function TeacherShell() {
     return <Navigate to="/teacher/home" replace />;
   }
 
-  // 평소엔 자식 라우트 그대로
-  return <Outlet />;
+  // 인증 상태: 데스크톱 최적화 레이아웃으로 자식 라우트 감싸기
+  return (
+    <div className="page teacher-page">
+      <div className="teacher-shell">
+        {/* 필요 시 상단 공용 헤더를 넣고 싶다면 이 영역 사용
+        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 12}}>
+          <h1 className="page-title" style={{margin:0}}>교사용</h1>
+          <nav className="teacher-text">
+            <Link to="/teacher/manage" style={{marginRight:12}}>학생관리</Link>
+            <Link to="/teacher/review" style={{marginRight:12}}>검수목록</Link>
+            <Link to="/teacher/today">오늘의 시험결과</Link>
+          </nav>
+        </div>
+        */}
+        <div className="teacher-row grid-2 teacher-text">
+          <Outlet />
+        </div>
+      </div>
+    </div>
+  );
 }
-
-const styles = {
-  page: { minHeight: "100vh", background: "#fff5f8", display:"flex", alignItems:"center", justifyContent:"center", padding:24 },
-  box: { width: 420, background:"#fff", borderRadius:12, padding:24, boxShadow:"0 8px 24px rgba(255,192,217,0.35)" },
-  title: { fontSize:22, fontWeight:800, color:"#ff6fa3", margin:"0 0 8px" },
-  input: { flex:1, padding:"10px 12px", border:"1px solid #e8a9bf", borderRadius:8, fontSize:14 },
-  btn: { background:"#ff6fa3", color:"#fff", border:"none", padding:"10px 14px", borderRadius:8, cursor:"pointer" },
-};

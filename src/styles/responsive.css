@@ -1,0 +1,100 @@
+/* src/styles/responsive.css */
+:root{
+  --bg-student: #fff5f8;    /* Rabbit 연핑크 배경 */
+  --bg-teacher: #f7f9fc;    /* 교사용 은은한 회색 */
+  --fg-primary: #ff6fa3;    /* Rabbit 핑크 포인트 */
+  --shadow-soft: 0 8px 24px rgba(0,0,0,0.06);
+}
+
+/* 공통 */
+.page {
+  min-height: 100dvh;
+}
+
+/* ===== 학생용(모바일) 컨테이너 ===== */
+.student-page {
+  background: var(--bg-student);
+}
+.student-container {
+  /* 모바일 전체폭 꽉 차게 + 안전한 패딩 */
+  width: 100%;
+  max-width: 480px;    /* 폰 기준 안전폭 */
+  margin: 0 auto;
+  padding: 16px;
+}
+.student-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  padding: 16px;
+}
+
+/* 터치 타겟/폰트 모바일 기준 */
+.student-text {
+  /* clamp(최소, 유동, 최대) */
+  font-size: clamp(14px, 1.8vw + 12px, 18px);
+  line-height: 1.48;
+}
+.button-lg {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* 작은 폰(<=360px)에서 살짝 더 촘촘히 */
+@media (max-width: 360px){
+  .student-container { padding: 12px; }
+  .student-card { padding: 12px; }
+}
+
+/* 태블릿에서 카드 최대폭 약간 늘림 */
+@media (min-width: 600px){
+  .student-container { max-width: 560px; }
+}
+
+/* ===== 선생님용(데스크톱) 컨테이너 ===== */
+.teacher-page {
+  background: var(--bg-teacher);
+}
+.teacher-shell {
+  /* 데스크톱 가독 좋은 최대폭 */
+  max-width: 1280px;       /* 일반 모니터 폭 */
+  margin: 0 auto;
+  padding: 24px 28px;
+}
+.teacher-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.teacher-card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  padding: 18px;
+}
+
+/* 넓은 화면에서 2~3열 그리드 */
+@media (min-width: 1024px){
+  .teacher-row.grid-2 { grid-template-columns: 1fr 1fr; }
+  .teacher-row.grid-3 { grid-template-columns: 1.2fr 1fr 1fr; }
+  .teacher-shell { max-width: 1440px; } /* 와이드 모니터일 때 */
+}
+
+/* 데스크톱 기본 폰트 */
+.teacher-text {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+/* 타이틀 공통 */
+.page-title {
+  font-weight: 800;
+  color: var(--fg-primary);
+  margin: 4px 0 12px;
+  font-size: clamp(18px, 1.2vw + 14px, 28px);
+}
