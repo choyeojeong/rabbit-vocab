@@ -9,81 +9,145 @@
 /* 공통 */
 .page { min-height: 100dvh; }
 
-/* ===== 학생용(모바일) 컨테이너 ===== */
+/* =========================
+   학생용(모바일) 컨테이너
+   ========================= */
 .student-page { background: var(--bg-student); }
 
-.student-container {
+.student-container{
   width: 100%;
-  max-width: 440px;   /* 🔽 기존 480 → 440으로 줄여 더 콤팩트 */
+  max-width: 440px;
   margin: 0 auto;
-  padding: 12px;      /* 🔽 기존 16px → 12px */
+  padding: 12px;
 }
 
-.student-card {
-  background: #fff;
-  border-radius: 10px;  /* 🔽 기존 12px → 10px */
+.student-card{
+  background:#fff;
+  border-radius:10px;
   box-shadow: var(--shadow-soft);
-  padding: 12px;        /* 🔽 기존 16px → 12px */
+  padding:12px;
 }
 
-/* 텍스트/버튼 크기 조정 */
-.student-text {
-  font-size: clamp(13px, 1.6vw + 11px, 16px); /* 🔽 전체 폰트 살짝 축소 */
-  line-height: 1.45;
+/* 텍스트/버튼 */
+.student-text{ font-size: clamp(13px, 1.6vw + 11px, 16px); line-height:1.45; }
+.button-lg{
+  display:block; width:100%;
+  padding:12px 14px; border-radius:8px;
+  border:none; font-weight:700; cursor:pointer; font-size:15px;
 }
 
-.button-lg {
-  display: block;
-  width: 100%;
-  padding: 12px 14px;   /* 🔽 기존 14/16 → 12/14 */
-  border-radius: 8px;   /* 🔽 둥글기 조금 축소 */
-  border: none;
-  font-weight: 700;
-  cursor: pointer;
-  font-size: 15px;      /* 🔽 버튼 글자 크기 축소 */
-}
-
-/* 작은 폰(<=360px) */
-@media (max-width: 360px){
-  .student-container { padding: 8px; }
-  .student-card { padding: 10px; }
+/* 아주 작은 폰 */
+@media (max-width:360px){
+  .student-container{ padding:8px; }
+  .student-card{ padding:10px; }
 }
 
 /* 태블릿 */
-@media (min-width: 600px){
-  .student-container { max-width: 520px; } /* 🔽 기존 560 → 520 */
+@media (min-width:600px){
+  .student-container{ max-width:520px; }
 }
 
-/* ===== 선생님용(데스크톱) 컨테이너 ===== */
-.teacher-page { background: var(--bg-teacher); }
-.teacher-shell {
+/* =========================
+   선생님용(데스크톱)
+   ========================= */
+.teacher-page{ background: var(--bg-teacher); }
+.teacher-shell{
   max-width: min(1600px, 96vw);
   margin: 0 auto;
   padding: 24px 28px;
 }
-.teacher-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
+.teacher-row{
+  display:grid;
+  grid-template-columns:1fr; /* 기본 1열(풀폭) */
+  gap:16px;
 }
-.teacher-card {
-  background: #fff;
-  border-radius: 12px;
+.teacher-card{
+  background:#fff;
+  border-radius:12px;
   box-shadow: var(--shadow-soft);
-  padding: 18px;
+  padding:18px;
 }
-@media (min-width: 1024px){
-  .teacher-row.grid-2 { grid-template-columns: 1fr 1fr; }
-  .teacher-row.grid-3 { grid-template-columns: 1.2fr 1fr 1fr; }
-  .teacher-shell { max-width: min(1680px, 96vw); }
+@media (min-width:1024px){
+  .teacher-row.grid-2{ grid-template-columns:1fr 1fr; }
+  .teacher-row.grid-3{ grid-template-columns:1.2fr 1fr 1fr; }
+  .teacher-shell{ max-width: min(1680px, 96vw); }
 }
-.teacher-text {
-  font-size: 16px;
-  line-height: 1.5;
+.teacher-text{ font-size:16px; line-height:1.5; }
+.page-title{
+  font-weight:800; color:var(--fg-primary);
+  margin:4px 0 12px;
+  font-size:clamp(18px, 1.2vw + 14px, 28px);
 }
-.page-title {
-  font-weight: 800;
-  color: var(--fg-primary);
-  margin: 4px 0 12px;
-  font-size: clamp(18px, 1.2vw + 14px, 28px);
+
+/* =========================
+   학생용 입력 폼 공통 규칙
+   (페이지별 수정 없이 일괄 적용)
+   ========================= */
+
+/* 유틸 그리드: 1~3열 */
+.student-grid-1{ display:grid; grid-template-columns:1fr; gap:10px; }
+.student-grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.student-grid-3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+
+/* grid 자식 폭 초과 방지 */
+.student-grid-1 > *,
+.student-grid-2 > *,
+.student-grid-3 > * { min-width:0; }
+
+/* 라벨+필드 래퍼(선택) */
+.student-field-wrap{ display:flex; flex-direction:column; gap:6px; }
+
+/* 기본 폼 라인(두 칸 균등) — 기존 페이지 호환용 */
+.student-row{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:12px;
 }
+
+/* 모든 입력 요소가 칸 폭을 정확히 채우도록 */
+.student-page select,
+.student-page input[type="text"],
+.student-page input[type="number"],
+.student-page input[type="search"],
+.student-page input[type="tel"],
+.student-page input[type="email"],
+.student-page input[type="password"],
+.student-page textarea{
+  width:100%;
+  max-width:100%;
+  box-sizing:border-box;                 /* ✅ 패딩/보더 포함 계산 */
+  padding:10px 12px;
+  border:1px solid #ffd3e3;
+  border-radius:10px;
+  font-size:14px;
+  background:#fff;
+  outline:none;
+  appearance:none;                       /* 공통 */
+  -webkit-appearance:none;               /* iOS 셀렉트/인풋 폭 깨짐 방지 */
+}
+
+/* .student-row 안의 필드에도 동일 적용(기존 코드 호환) */
+.student-row select,
+.student-row input[type="text"],
+.student-row input[type="number"]{
+  width:100%;
+  box-sizing:border-box;
+  padding:10px 12px;
+  border:1px solid #e8a9bf;
+  border-radius:8px;
+  font-size:14px;
+}
+
+/* 길게 입력해도 박스 밖으로 안 튀도록 */
+.student-page input,
+.student-page textarea{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+/* iOS 입력 확대 방지(입력 폰트 최소 16px 권장) */
+.student-page input,
+.student-page select,
+.student-page textarea{ font-size:16px; }
