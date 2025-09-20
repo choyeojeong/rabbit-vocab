@@ -1,139 +1,131 @@
-:root{
-  --bg-student: #fff5f8;
+/* src/styles/responsive.css */
+:root {
+  --bg-student: #fff5f8; /* 연핑크 배경 */
   --bg-teacher: #f7f9fc;
   --fg-primary: #ff6fa3;
-  --shadow-soft: 0 8px 24px rgba(0,0,0,0.06);
-
-  /* 모바일 기본 타이포 (더 컴팩트) */
-  --fz-body: 14.5px;
-  --fz-button: 15px;
-  --fz-title: 20px;
-
-  /* 카드 라운드/패딩 */
-  --radius: 12px;
-  --pad-card: 14px;
-  --pad-input-v: 9px;
-  --pad-input-h: 12px;
-  --pad-btn-v: 11px;
-  --pad-btn-h: 14px;
-
-  /* 레이아웃 폭 */
-  --container-max: 380px; /* 🔽 440 → 380 */
+  --shadow-soft: 0 10px 30px rgba(0,0,0,0.06);
 }
 
-/* ===== 공통 배경 ===== */
-.student-page { 
+/* ===== 리셋 & 뷰포트/배경 꽉 채우기 ===== */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
   background: var(--bg-student);
-  min-height: 100svh;            /* 모바일 주소창 변동 대응 */
-  min-height: 100dvh;            /* fallback */
+  color: #222;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;           /* 우측 하단 여백/가로스크롤 방지 */
 }
 
-/* ===== 중앙 정렬: 모든 학생 페이지 공통 =====
-   - 컴포넌트 수정 없이 .student-container를 화면 세로 중앙에 배치
-   - 내용이 길어지면 자동으로 위아래 스크롤 가능  */
-.student-page > .student-container{
+/* 주소창 높이 변화 대응: 100svh 우선, 폴백으로 100dvh/100vh */
+.vh-100 { min-height: 100svh; }
+@supports not (min-height: 100svh) {
+  .vh-100 { min-height: 100dvh; }
+}
+@supports not (min-height: 100dvh) {
+  .vh-100 { min-height: 100vh; }
+}
+
+/* iOS 하단 홈 인디케이터 여백 */
+.with-safe {
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+/* ===== 공통 페이지 래퍼 ===== */
+.page {
   width: 100%;
-  max-width: var(--container-max);
-  margin: 0 auto;
-  padding: 10px;                 /* 🔽 12 → 10 */
-  min-height: 100svh;
   min-height: 100dvh;
+}
+
+.student-page { background: var(--bg-student); }
+.teacher-page { background: var(--bg-teacher); }
+
+/* 화면 중앙 정렬 유틸 (세로/가로 모두) */
+.centered {
   display: flex;
-  flex-direction: column;
-  justify-content: center;       /* ✅ 세로 중앙 */
-  /* iOS safe area */
-  padding-top: max(10px, env(safe-area-inset-top));
-  padding-right: max(10px, env(safe-area-inset-right));
-  padding-bottom: max(10px, env(safe-area-inset-bottom));
-  padding-left: max(10px, env(safe-area-inset-left));
+  align-items: center;
+  justify-content: center;
 }
 
-/* 내용이 길어질 때 여유를 주기 위해 카드 자체는 100%로 */
-.student-card{
-  background: #fff;
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-soft);
-  padding: var(--pad-card);
+/* 스크롤 있는 페이지에서 카드만 가운데 정렬하고 싶을 때 */
+.centered-top {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* ===== 학생용(모바일 우선) ===== */
+.student-container {
   width: 100%;
+  max-width: 440px;   /* 살짝 더 컴팩트하게 */
+  margin: 0 auto;
+  padding: 16px;
 }
 
-/* ===== 타이틀/텍스트 ===== */
-.student-title{
-  font-size: var(--fz-title);
+.student-card {
+  width: 100%;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  padding: 18px;
+}
+
+/* 타이틀/자잘한 요소들 예쁜 기본값 */
+.student-title {
+  font-size: 22px;
   font-weight: 800;
   color: var(--fg-primary);
-  margin: 6px 0 10px;
+  margin: 0 0 10px;
 }
 
-.form-label{ font-size: 13px; color:#444; margin: 8px 2px 6px; }
-.help-text{ font-size: 12px; color:#8a7f85; }
-
-/* ===== 폼/버튼 사이즈 최적화 ===== */
-.input, .select, 
-input[type="text"], input[type="number"], input[type="tel"], 
-select, textarea{
-  width: 100%;
-  font-size: var(--fz-body);
-  padding: var(--pad-input-v) var(--pad-input-h);
-  border: 1px solid #f7c3d5;
-  border-radius: 10px;
-  background: #fff;
-  outline: none;
+.student-sub {
+  font-size: 13px;
+  color: #666;
+  margin: 0 0 14px;
 }
 
-.input::placeholder{ color:#b9a9b2; }
-
-button, .button{
+/* 버튼/인풋 기본 스케일 조금 줄이기 */
+.student-input,
+.student-select,
+.student-button {
   width: 100%;
-  font-size: var(--fz-button);
-  font-weight: 700;
-  padding: var(--pad-btn-v) var(--pad-btn-h);
-  border: none;
-  border-radius: 12px;
+  font-size: 15px;
+  padding: 11px 12px;
+  border-radius: 8px;
+  border: 1px solid #eee;
+}
+
+.student-button {
   background: var(--fg-primary);
-  color:#fff;
-  box-shadow: 0 6px 18px rgba(255,111,163,0.32);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(255, 111, 163, 0.25);
 }
 
-.button--ghost{
-  background:#fff;
-  color: var(--fg-primary);
-  border: 2px solid var(--fg-primary);
-  box-shadow: none;
+.student-button:active { transform: translateY(1px); }
+
+/* 카드 간격 */
+.stack > * + * { margin-top: 12px; }
+
+/* ===== 반응형 보정 ===== */
+@media (min-width: 480px) {
+  .student-card { padding: 20px; }
+  .student-title { font-size: 24px; }
 }
 
-/* ===== 간격 유틸 ===== */
-.row{ display:grid; gap:10px; }
-.stack-6 > * + * { margin-top:6px; }
-.stack-8 > * + * { margin-top:8px; }
-.stack-12 > * + * { margin-top:12px; }
-
-/* ===== 작은 디스플레이 보정 (<=360px) ===== */
-@media (max-width: 360px){
-  :root{
-    --fz-body: 14px;
-    --fz-button: 14.5px;
-    --fz-title: 19px;
-    --container-max: 340px;
-    --pad-card: 12px;
-    --pad-input-v: 8px;
-    --pad-btn-v: 10px;
-    --radius: 10px;
-  }
+@media (min-width: 768px) {
+  .student-container { max-width: 520px; }
+  .student-card { padding: 24px; }
 }
-
-/* ===== 큰 디스플레이 보정 (>=480px) — 너무 커보이지 않도록 상한선 유지 ===== */
-@media (min-width: 480px){
-  :root{ --container-max: 420px; }
-}
-
-/* ===== 폼 그룹 라인 컴팩트 ===== */
-.form-row{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-@media (max-width: 420px){ .form-row{ grid-template-columns: 1fr; } }
-
-/* ===== 토글/체크박스 라인 높이 최적화 ===== */
-.form-check{
-  display:flex; align-items:center; gap:8px;
-  font-size: var(--fz-body);
-}
-.form-check input{ width:18px; height:18px; }
