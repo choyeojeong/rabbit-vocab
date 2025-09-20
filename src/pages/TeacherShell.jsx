@@ -4,13 +4,6 @@ import { Navigate, Outlet, Link, useLocation, useNavigate } from "react-router-d
 
 const PASS = import.meta.env.VITE_TEACHER_PASS || "RABBIT";
 
-/**
- * 교사용 모든 하위 라우트를 감싸는 게이트 + 레이아웃 쉘
- * - 미인증: 비번 폼 표시
- * - 인증 직후: 어떤 경로로 들어왔든 /teacher/home 으로 1회 이동
- * - 인증 상태: 데스크톱 최적화 레이아웃(.teacher-page/.teacher-shell) 안에 <Outlet/> 렌더
- *   → responsive.css의 .teacher-* 스타일이 적용되어 PC 화면에 딱 맞게 표시됩니다.
- */
 export default function TeacherShell() {
   const [ok, setOk] = useState(false);
   const [tried, setTried] = useState(false);
@@ -27,7 +20,6 @@ export default function TeacherShell() {
   }, []);
 
   useEffect(() => {
-    // 비번 통과 직후 한 번만 홈으로 강제 이동
     if (ok && justUnlocked) {
       setJustUnlocked(false);
       navigate("/teacher/home", { replace: true });
@@ -47,7 +39,6 @@ export default function TeacherShell() {
 
   if (!tried) return null;
 
-  // 미인증: 비번 폼
   if (!ok) {
     return (
       <div className="page teacher-page" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -95,26 +86,15 @@ export default function TeacherShell() {
     );
   }
 
-  // 이미 인증된 상태로 /teacher 루트면 홈으로
   if (loc.pathname === "/teacher") {
     return <Navigate to="/teacher/home" replace />;
   }
 
-  // 인증 상태: 데스크톱 최적화 레이아웃으로 자식 라우트 감싸기
+  // ✅ 기본 1열(풀폭). 페이지에서 필요할 때만 grid-2 / grid-3를 직접 추가해서 사용.
   return (
     <div className="page teacher-page">
       <div className="teacher-shell">
-        {/* 필요 시 상단 공용 헤더를 넣고 싶다면 이 영역 사용
-        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 12}}>
-          <h1 className="page-title" style={{margin:0}}>교사용</h1>
-          <nav className="teacher-text">
-            <Link to="/teacher/manage" style={{marginRight:12}}>학생관리</Link>
-            <Link to="/teacher/review" style={{marginRight:12}}>검수목록</Link>
-            <Link to="/teacher/today">오늘의 시험결과</Link>
-          </nav>
-        </div>
-        */}
-        <div className="teacher-row grid-2 teacher-text">
+        <div className="teacher-row teacher-text">
           <Outlet />
         </div>
       </div>
