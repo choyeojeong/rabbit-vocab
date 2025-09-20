@@ -1,153 +1,139 @@
-/* src/styles/responsive.css */
 :root{
   --bg-student: #fff5f8;
   --bg-teacher: #f7f9fc;
   --fg-primary: #ff6fa3;
   --shadow-soft: 0 8px 24px rgba(0,0,0,0.06);
+
+  /* 모바일 기본 타이포 (더 컴팩트) */
+  --fz-body: 14.5px;
+  --fz-button: 15px;
+  --fz-title: 20px;
+
+  /* 카드 라운드/패딩 */
+  --radius: 12px;
+  --pad-card: 14px;
+  --pad-input-v: 9px;
+  --pad-input-h: 12px;
+  --pad-btn-v: 11px;
+  --pad-btn-h: 14px;
+
+  /* 레이아웃 폭 */
+  --container-max: 380px; /* 🔽 440 → 380 */
 }
 
-/* 공통 */
-.page { min-height: 100dvh; }
+/* ===== 공통 배경 ===== */
+.student-page { 
+  background: var(--bg-student);
+  min-height: 100svh;            /* 모바일 주소창 변동 대응 */
+  min-height: 100dvh;            /* fallback */
+}
 
-/* =========================
-   학생용(모바일) 컨테이너
-   ========================= */
-.student-page { background: var(--bg-student); }
-
-.student-container{
+/* ===== 중앙 정렬: 모든 학생 페이지 공통 =====
+   - 컴포넌트 수정 없이 .student-container를 화면 세로 중앙에 배치
+   - 내용이 길어지면 자동으로 위아래 스크롤 가능  */
+.student-page > .student-container{
   width: 100%;
-  max-width: 440px;
+  max-width: var(--container-max);
   margin: 0 auto;
-  padding: 12px;
+  padding: 10px;                 /* 🔽 12 → 10 */
+  min-height: 100svh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;       /* ✅ 세로 중앙 */
+  /* iOS safe area */
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-right: max(10px, env(safe-area-inset-right));
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+  padding-left: max(10px, env(safe-area-inset-left));
 }
 
+/* 내용이 길어질 때 여유를 주기 위해 카드 자체는 100%로 */
 .student-card{
-  background:#fff;
-  border-radius:10px;
+  background: #fff;
+  border-radius: var(--radius);
   box-shadow: var(--shadow-soft);
-  padding:12px;
+  padding: var(--pad-card);
+  width: 100%;
 }
 
-/* 텍스트/버튼 */
-.student-text{ font-size: clamp(13px, 1.6vw + 11px, 16px); line-height:1.45; }
-.button-lg{
-  display:block; width:100%;
-  padding:12px 14px; border-radius:8px;
-  border:none; font-weight:700; cursor:pointer; font-size:15px;
+/* ===== 타이틀/텍스트 ===== */
+.student-title{
+  font-size: var(--fz-title);
+  font-weight: 800;
+  color: var(--fg-primary);
+  margin: 6px 0 10px;
 }
 
-/* 아주 작은 폰 */
-@media (max-width:360px){
-  .student-container{ padding:8px; }
-  .student-card{ padding:10px; }
+.form-label{ font-size: 13px; color:#444; margin: 8px 2px 6px; }
+.help-text{ font-size: 12px; color:#8a7f85; }
+
+/* ===== 폼/버튼 사이즈 최적화 ===== */
+.input, .select, 
+input[type="text"], input[type="number"], input[type="tel"], 
+select, textarea{
+  width: 100%;
+  font-size: var(--fz-body);
+  padding: var(--pad-input-v) var(--pad-input-h);
+  border: 1px solid #f7c3d5;
+  border-radius: 10px;
+  background: #fff;
+  outline: none;
 }
 
-/* 태블릿 */
-@media (min-width:600px){
-  .student-container{ max-width:520px; }
+.input::placeholder{ color:#b9a9b2; }
+
+button, .button{
+  width: 100%;
+  font-size: var(--fz-button);
+  font-weight: 700;
+  padding: var(--pad-btn-v) var(--pad-btn-h);
+  border: none;
+  border-radius: 12px;
+  background: var(--fg-primary);
+  color:#fff;
+  box-shadow: 0 6px 18px rgba(255,111,163,0.32);
 }
 
-/* =========================
-   선생님용(데스크톱)
-   ========================= */
-.teacher-page{ background: var(--bg-teacher); }
-.teacher-shell{
-  max-width: min(1600px, 96vw);
-  margin: 0 auto;
-  padding: 24px 28px;
-}
-.teacher-row{
-  display:grid;
-  grid-template-columns:1fr; /* 기본 1열(풀폭) */
-  gap:16px;
-}
-.teacher-card{
+.button--ghost{
   background:#fff;
-  border-radius:12px;
-  box-shadow: var(--shadow-soft);
-  padding:18px;
-}
-@media (min-width:1024px){
-  .teacher-row.grid-2{ grid-template-columns:1fr 1fr; }
-  .teacher-row.grid-3{ grid-template-columns:1.2fr 1fr 1fr; }
-  .teacher-shell{ max-width: min(1680px, 96vw); }
-}
-.teacher-text{ font-size:16px; line-height:1.5; }
-.page-title{
-  font-weight:800; color:var(--fg-primary);
-  margin:4px 0 12px;
-  font-size:clamp(18px, 1.2vw + 14px, 28px);
+  color: var(--fg-primary);
+  border: 2px solid var(--fg-primary);
+  box-shadow: none;
 }
 
-/* =========================
-   학생용 입력 폼 공통 규칙
-   (페이지별 수정 없이 일괄 적용)
-   ========================= */
+/* ===== 간격 유틸 ===== */
+.row{ display:grid; gap:10px; }
+.stack-6 > * + * { margin-top:6px; }
+.stack-8 > * + * { margin-top:8px; }
+.stack-12 > * + * { margin-top:12px; }
 
-/* 유틸 그리드: 1~3열 */
-.student-grid-1{ display:grid; grid-template-columns:1fr; gap:10px; }
-.student-grid-2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.student-grid-3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
-
-/* grid 자식 폭 초과 방지 */
-.student-grid-1 > *,
-.student-grid-2 > *,
-.student-grid-3 > * { min-width:0; }
-
-/* 라벨+필드 래퍼(선택) */
-.student-field-wrap{ display:flex; flex-direction:column; gap:6px; }
-
-/* 기본 폼 라인(두 칸 균등) — 기존 페이지 호환용 */
-.student-row{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:10px;
-  margin-top:12px;
+/* ===== 작은 디스플레이 보정 (<=360px) ===== */
+@media (max-width: 360px){
+  :root{
+    --fz-body: 14px;
+    --fz-button: 14.5px;
+    --fz-title: 19px;
+    --container-max: 340px;
+    --pad-card: 12px;
+    --pad-input-v: 8px;
+    --pad-btn-v: 10px;
+    --radius: 10px;
+  }
 }
 
-/* 모든 입력 요소가 칸 폭을 정확히 채우도록 */
-.student-page select,
-.student-page input[type="text"],
-.student-page input[type="number"],
-.student-page input[type="search"],
-.student-page input[type="tel"],
-.student-page input[type="email"],
-.student-page input[type="password"],
-.student-page textarea{
-  width:100%;
-  max-width:100%;
-  box-sizing:border-box;                 /* ✅ 패딩/보더 포함 계산 */
-  padding:10px 12px;
-  border:1px solid #ffd3e3;
-  border-radius:10px;
-  font-size:14px;
-  background:#fff;
-  outline:none;
-  appearance:none;                       /* 공통 */
-  -webkit-appearance:none;               /* iOS 셀렉트/인풋 폭 깨짐 방지 */
+/* ===== 큰 디스플레이 보정 (>=480px) — 너무 커보이지 않도록 상한선 유지 ===== */
+@media (min-width: 480px){
+  :root{ --container-max: 420px; }
 }
 
-/* .student-row 안의 필드에도 동일 적용(기존 코드 호환) */
-.student-row select,
-.student-row input[type="text"],
-.student-row input[type="number"]{
-  width:100%;
-  box-sizing:border-box;
-  padding:10px 12px;
-  border:1px solid #e8a9bf;
-  border-radius:8px;
-  font-size:14px;
-}
+/* ===== 폼 그룹 라인 컴팩트 ===== */
+.form-row{ display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 420px){ .form-row{ grid-template-columns: 1fr; } }
 
-/* 길게 입력해도 박스 밖으로 안 튀도록 */
-.student-page input,
-.student-page textarea{
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
+/* ===== 토글/체크박스 라인 높이 최적화 ===== */
+.form-check{
+  display:flex; align-items:center; gap:8px;
+  font-size: var(--fz-body);
 }
-
-/* iOS 입력 확대 방지(입력 폰트 최소 16px 권장) */
-.student-page input,
-.student-page select,
-.student-page textarea{ font-size:16px; }
+.form-check input{ width:18px; height:18px; }
