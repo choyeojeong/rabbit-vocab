@@ -6,15 +6,11 @@ import { isAnswerCorrect } from '../utils/textEval';
 import { supabase } from '../utils/supabaseClient';
 import { getSession } from '../utils/session';
 import useExamFocusGuard from '../hooks/useExamFocusGuard';
+import StudentShell from './StudentShell';
 
 const styles = {
-  page: { minHeight: '100vh', background: '#fff5f8', padding: 24 },
-  box: { maxWidth: 900, margin: '0 auto', background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(255,192,217,0.35)' },
-  title: { fontSize: 22, fontWeight: 800, color: '#ff6fa3', marginBottom: 8 },
-  row: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 },
   input: { width: '100%', padding: '12px 14px', border: '1px solid #ffd3e3', borderRadius: 10, outline: 'none', fontSize: 14 },
   btn: { padding: '12px 16px', borderRadius: 10, border: 'none', color: '#fff', fontWeight: 700, cursor: 'pointer', background: '#ff6fa3' },
-  card: { marginTop: 18, border: '1px solid #ffd3e3', borderRadius: 12, padding: 20 },
   term: { fontSize: 28, fontWeight: 900, color: '#333', textAlign: 'center' },
   timer: { fontSize: 14, color: '#ff6fa3', textAlign: 'center', marginTop: 6 },
   info: { fontSize: 13, color: '#777' },
@@ -55,7 +51,7 @@ export default function OfficialExamPage() {
   // 결과/세션
   const [corrects, setCorrects] = useState(0);
   const [results, setResults] = useState([]); // [{word, your, ok}]
-  const [sessionId, setSessionId] = useState(null); // ⬅️ 포커스 이탈 로그용
+  const [sessionId, setSessionId] = useState(null); // 포커스 이탈 로그용
 
   useEffect(() => { answerRef.current = answer; }, [answer]);
 
@@ -97,7 +93,7 @@ export default function OfficialExamPage() {
     const n = Math.max(1, Math.min(numQ, words.length));
     const chosen = sampleN(words, n);
 
-    // 세션을 "먼저" 생성해 sessionId 확보 (이탈 로그 위해 필요)
+    // 세션을 먼저 생성해 sessionId 확보 (이탈 로그 위해 필요)
     let bounds, chaptersText;
     try {
       bounds = computeChapterBounds();
@@ -119,8 +115,6 @@ export default function OfficialExamPage() {
     } catch {}
 
     try {
-      // status는 enum('submitted'|'finalized') 구조이므로 우선 'submitted'로 생성하고
-      // 제출 시 최종 점수/통과여부를 업데이트합니다.
       const { data, error } = await supabase
         .from('test_sessions')
         .insert([{
@@ -320,7 +314,6 @@ export default function OfficialExamPage() {
     } catch (err) {
       console.error('[OfficialExam] items insert failed:', err);
       alert(`제출 중 오류(문항 저장): ${err?.message || err}`);
-      // 세션은 이미 존재하므로 교사 검수 화면에서는 보이나, 문항이 비었을 수 있음
       setPhase('submitted');
       return;
     }
@@ -328,100 +321,110 @@ export default function OfficialExamPage() {
     setPhase('submitted');
   }
 
+  // 잘못된 진입 처리
   if (!book) {
     return (
-      <div style={styles.page}>
-        <div style={styles.box}>잘못된 접근입니다.</div>
-      </div>
+      <StudentShell>
+        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+          <div className="student-container">
+            <div className="student-card stack">잘못된 접근입니다.</div>
+          </div>
+        </div>
+      </StudentShell>
     );
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.box}>
-        <h1 style={styles.title}>시험보기 (공식)</h1>
+    <StudentShell>
+      <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+        <div className="student-container">
+          <div className="student-card stack">
+            {/* config 단계: 책/범위/문항수/컷 설정 */}
+            {phase === 'config' && (
+              <>
+                <div className="student-row">
+                  <div>
+                    <div style={{ fontSize: 13, color: '#444' }}>책 / 범위</div>
+                    <div style={styles.info}>
+                      {book} | {chaptersParam ? `챕터: ${chaptersParam}` : `${start}~${end}강`}
+                    </div>
+                  </div>
+                  <div />
+                  <div>
+                    <div style={{ fontSize: 13, color: '#444' }}>문제 수</div>
+                    <input
+                      style={styles.input}
+                      value={numQ}
+                      onChange={(e) => setNumQ(Number(e.target.value || 0))}
+                      type="number"
+                      min={1}
+                      max={999}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, color: '#444' }}>커트라인(-X컷)</div>
+                    <input
+                      style={styles.input}
+                      value={cutMiss}
+                      onChange={(e) => setCutMiss(Number(e.target.value || 0))}
+                      type="number"
+                      min={0}
+                      max={999}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <button className="btn" style={styles.btn} onClick={startExam}>시작하기</button>
+                </div>
+              </>
+            )}
 
-        {phase === 'config' && (
-          <>
-            <div style={styles.row}>
-              <div>
-                <div style={{ fontSize: 13, color: '#444' }}>책 / 범위</div>
-                <div style={styles.info}>
-                  {book} | {chaptersParam ? `챕터: ${chaptersParam}` : `${start}~${end}강`}
+            {/* exam 단계: 타이머 + 제출 */}
+            {phase === 'exam' && (
+              <div style={{ marginTop: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <div>문항 {i + 1} / {seq.length}</div>
+                  <div>맞춘 개수: {corrects}</div>
+                </div>
+                <div style={styles.term}>{seq[i]?.term_en}</div>
+                <div style={styles.timer}>남은 시간: {remaining}초</div>
+
+                <div style={{ marginTop: 14 }}>
+                  <input
+                    key={inputKey}
+                    ref={inputRef}
+                    style={styles.input}
+                    placeholder="뜻을 입력하세요 (예: 달리다)"
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submitCurrent(answer); }}
+                  />
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <button className="btn" style={styles.btn} onClick={() => submitCurrent(answerRef.current)}>
+                    제출(Enter)
+                  </button>
                 </div>
               </div>
-              <div />
+            )}
+
+            {/* submitted 단계: 안내 */}
+            {phase === 'submitted' && (
               <div>
-                <div style={{ fontSize: 13, color: '#444' }}>문제 수</div>
-                <input
-                  style={styles.input}
-                  value={numQ}
-                  onChange={(e) => setNumQ(Number(e.target.value || 0))}
-                  type="number"
-                  min={1}
-                  max={999}
-                />
+                <div style={styles.warn}>
+                  <b>제출 완료</b><br />
+                  시험 결과는 선생님 검수 후 전달됩니다. 잠시만 기다려 주세요.
+                </div>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button className="btn" style={styles.btn} onClick={() => nav('/study')}>다른 범위로 공부</button>
+                  <button className="btn" style={styles.btn} onClick={() => nav('/dashboard')}>대시보드</button>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: 13, color: '#444' }}>커트라인(-X컷)</div>
-                <input
-                  style={styles.input}
-                  value={cutMiss}
-                  onChange={(e) => setCutMiss(Number(e.target.value || 0))}
-                  type="number"
-                  min={0}
-                  max={999}
-                />
-              </div>
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <button className="btn" style={styles.btn} onClick={startExam}>시작하기</button>
-            </div>
-          </>
-        )}
-
-        {phase === 'exam' && (
-          <div style={styles.card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <div>문항 {i + 1} / {seq.length}</div>
-              <div>맞춘 개수: {corrects}</div>
-            </div>
-            <div style={styles.term}>{seq[i]?.term_en}</div>
-            <div style={styles.timer}>남은 시간: {remaining}초</div>
-
-            <div style={{ marginTop: 14 }}>
-              <input
-                key={inputKey}
-                ref={inputRef}
-                style={styles.input}
-                placeholder="뜻을 입력하세요 (예: 달리다)"
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') submitCurrent(answer); }}
-              />
-            </div>
-
-            <div style={{ marginTop: 12 }}>
-              <button className="btn" style={styles.btn} onClick={() => submitCurrent(answerRef.current)}>
-                제출(Enter)
-              </button>
-            </div>
+            )}
           </div>
-        )}
-
-        {phase === 'submitted' && (
-          <div style={styles.card}>
-            <div style={styles.warn}>
-              <b>제출 완료</b><br />
-              시험 결과는 선생님 검수 후 전달됩니다. 잠시만 기다려 주세요.
-            </div>
-            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn" style={styles.btn} onClick={() => nav('/study')}>다른 범위로 공부</button>
-              <button className="btn" style={styles.btn} onClick={() => nav('/dashboard')}>대시보드</button>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
-    </div>
+    </StudentShell>
   );
 }

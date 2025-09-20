@@ -11,16 +11,14 @@ import {
 import { supabase } from '../utils/supabaseClient';
 import { getSession } from '../utils/session';
 import { speakWord, speakCancel } from '../utils/speech';
+import StudentShell from './StudentShell';
 
 const styles = {
-  page: { minHeight: '100vh', background: '#fff5f8', padding: 24 },
-  box: { maxWidth: 900, margin: '0 auto', background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(255,192,217,0.35)' },
-  title: { fontSize: 22, fontWeight: 800, color: '#ff6fa3', marginBottom: 8 },
-  card: { marginTop: 18, border: '1px solid #ffd3e3', borderRadius: 12, padding: 20 },
+  card: { border: '1px solid #ffd3e3', borderRadius: 12, padding: 20 },
   termRow: { display:'flex', alignItems:'center', justifyContent:'center', gap:12, marginBottom: 8 },
   term: { fontSize: 28, fontWeight: 900, color: '#333', textAlign: 'center' },
   btns: { display: 'grid', gridTemplateColumns: '1fr', gap: 10, marginTop: 16 },
-  opt: { padding: '12px 14px', borderRadius: 10, border: '1px solid #ffd3e3', background: '#fff', cursor: 'pointer', textAlign: 'left' },
+  opt: { padding: '12px 14px', borderRadius: 10, border: '1px solid #ffd3e3', background: '#fff', cursor: 'pointer', textAlign: 'left', color: '#000' },
   correct: { background: '#e7fff3', borderColor: '#b3f0d0' },
   wrong: { background: '#ffe3ea', borderColor: '#ffb8c9' },
   footer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 },
@@ -30,8 +28,6 @@ const styles = {
   tagWrong: { display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: '#ffe3ea', color: '#b00020', fontSize: 12, marginLeft: 6 },
   btnRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 },
   speakerBtn: { border: '1px solid #ffd0e1', background: '#fff5f8', borderRadius: 12, padding: '8px 10px', cursor: 'pointer' },
-
-  // sound unlock bar
   unlockBar: { background:'#fff0f5', border:'1px dashed #ff9fc0', padding:'10px 12px', borderRadius:12, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:12 },
   unlockBtn: { padding:'8px 12px', borderRadius:10, border:'1px solid #ff9fc0', background:'#ffeff6', fontWeight:700, cursor:'pointer' },
 };
@@ -137,7 +133,7 @@ export default function PracticeMCQ() {
   // 문제 변경 시 자동 발음 (🔊 soundEnabled 일 때만)
   useEffect(() => {
     if (!current?.term_en) return;
-    if (!soundEnabled) return; // 모바일 자동재생 차단 회피: unlock 전에는 발음 X
+    if (!soundEnabled) return;
     speakWord(current.term_en);
     return () => speakCancel();
   }, [current?.id, soundEnabled]);
@@ -160,7 +156,7 @@ export default function PracticeMCQ() {
     }
   }
 
-  // 보기 클릭: 보기 선택 시에는 발음하지 않음(요청 사항 유지)
+  // 보기 클릭(발음 없음)
   async function choose(idx) {
     if (chosen >= 0 || phase !== 'play') return;
     setChosen(idx);
@@ -181,25 +177,16 @@ export default function PracticeMCQ() {
     setI((x) => x + 1);
   }
 
-  // 🔊 오디오 잠금 해제 (모바일 정책 대응)
+  // 🔊 오디오 잠금 해제
   async function enableSoundOnce() {
     try {
-      // 1) Speech API 깨우기
-      try {
-        window.speechSynthesis?.resume?.();
-      } catch {}
-      try {
-        // iOS에서 종종 첫 제스처 내 cancel이 효과적
-        window.speechSynthesis?.cancel?.();
-      } catch {}
-
-      // 2) AudioContext 깨우기 (브라우저별 보조)
+      try { window.speechSynthesis?.resume?.(); } catch {}
+      try { window.speechSynthesis?.cancel?.(); } catch {}
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (Ctx) {
           const ctx = new Ctx();
           if (ctx.state === 'suspended') await ctx.resume();
-          // 아주 짧은 무음 버퍼 재생 (일부 환경에서 필요)
           const buffer = ctx.createBuffer(1, 1, 22050);
           const src = ctx.createBufferSource();
           src.buffer = buffer;
@@ -210,110 +197,133 @@ export default function PracticeMCQ() {
 
       setSoundEnabled(true);
       localStorage.setItem('sound_enabled', 'true');
-
-      // 즉시 현재 단어 한 번 발음(요청 느낌 좋게)
       if (current?.term_en) speakWord(current.term_en);
     } catch (e) {
       console.warn('enableSoundOnce fail', e);
     }
   }
 
-  if (!book) return <div style={styles.page}><div style={styles.box}>잘못된 접근입니다.</div></div>;
-  if (!words.length) return <div style={styles.page}><div style={styles.box}>선택한 범위에 단어가 없어요.</div></div>;
-
-  return (
-    <div style={styles.page}>
-      <div style={styles.box}>
-        {/* 🔊 소리 켜기(한번) 안내 바: unlock 전 1회 노출 */}
-        {!soundEnabled && (
-          <div style={styles.unlockBar} role="region" aria-label="소리 사용 안내">
-            <div style={{fontSize:13, color:'#444'}}>
-              모바일에서는 자동재생이 차단될 수 있어요. <b>소리 켜기</b>를 한 번 눌러주세요.
-            </div>
-            <button type="button" onClick={enableSoundOnce} style={styles.unlockBtn}>
-              🔊 소리 켜기(한번)
-            </button>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <h1 style={styles.title}>객관식 연습</h1>
-          <div style={styles.info}>
-            {book} | {chaptersParam ? `챕터: ${chaptersParam}` : `${start}~${end}강`} | {phase === 'play' ? `${i + 1}/${words.length}` : `${words.length}문제 완료`} | 점수 {score}
+  if (!book) {
+    return (
+      <StudentShell>
+        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+          <div className="student-container">
+            <div className="student-card">잘못된 접근입니다.</div>
           </div>
         </div>
+      </StudentShell>
+    );
+  }
+  if (!words.length) {
+    return (
+      <StudentShell>
+        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+          <div className="student-container">
+            <div className="student-card">선택한 범위에 단어가 없어요.</div>
+          </div>
+        </div>
+      </StudentShell>
+    );
+  }
 
-        {phase === 'play' && (
-          <div style={styles.card}>
-            {/* 영어 단어 + 스피커 버튼 */}
-            <div style={styles.termRow}>
-              <div style={styles.term}>{current?.term_en}</div>
-              <button
-                type="button"
-                aria-label="발음 듣기"
-                title="발음 듣기"
-                style={styles.speakerBtn}
-                onClick={() => current?.term_en && speakWord(current.term_en)}
-              >
-                <SpeakerIcon />
+  return (
+    <StudentShell>
+      <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+        <div className="student-container">
+          {/* 🔊 소리 켜기(한번) 안내 바 */}
+          {!soundEnabled && (
+            <div className="student-card" style={styles.unlockBar} role="region" aria-label="소리 사용 안내">
+              <div style={{fontSize:13, color:'#444'}}>
+                모바일에서는 자동재생이 차단될 수 있어요. <b>소리 켜기</b>를 한 번 눌러주세요.
+              </div>
+              <button type="button" onClick={enableSoundOnce} style={styles.unlockBtn}>
+                🔊 소리 켜기(한번)
               </button>
             </div>
+          )}
 
-            {/* 보기(뜻) */}
-            <div style={styles.btns}>
-              {opts.map((op, idx) => {
-                const picked = chosen === idx;
-                const isCorrect = idx === ansIdx;
-                let st = styles.opt;
-                if (chosen >= 0) {
-                  if (isCorrect) st = { ...st, ...styles.correct };
-                  else if (picked && !isCorrect) st = { ...st, ...styles.wrong };
-                }
-                return (
-                  <button key={idx} onClick={() => choose(idx)} style={st}>
-                    {idx + 1}. {op}
+          <div className="student-card" style={{ marginTop: 12 }}>
+            {/* 진행 정보 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', color:'#444', fontSize:13 }}>
+              <div>{book} | {chaptersParam ? `챕터: ${chaptersParam}` : `${start}~${end}강`}</div>
+              <div>{phase === 'play' ? `${i + 1}/${words.length}` : `${words.length}문제 완료`} | 점수 {score}</div>
+            </div>
+
+            {/* 문제 카드 */}
+            {phase === 'play' && (
+              <div style={styles.card}>
+                {/* 영어 단어 + 스피커 버튼 */}
+                <div style={styles.termRow}>
+                  <div style={styles.term}>{current?.term_en}</div>
+                  <button
+                    type="button"
+                    aria-label="발음 듣기"
+                    title="발음 듣기"
+                    style={styles.speakerBtn}
+                    onClick={() => current?.term_en && speakWord(current.term_en)}
+                  >
+                    <SpeakerIcon />
                   </button>
-                );
-              })}
-            </div>
+                </div>
 
-            <div style={styles.footer}>
-              <div style={styles.info}>
-                {chosen >= 0
-                  ? (chosen === ansIdx ? '정답!' : `오답 😿  정답: ${opts[ansIdx]}`)
-                  : '보기 중 하나를 선택하세요.'}
-              </div>
-              <button style={styles.next} onClick={next} disabled={chosen < 0}>다음</button>
-            </div>
-          </div>
-        )}
+                {/* 보기(뜻) */}
+                <div style={styles.btns}>
+                  {opts.map((op, idx) => {
+                    const picked = chosen === idx;
+                    const isCorrect = idx === ansIdx;
+                    let st = styles.opt;
+                    if (chosen >= 0) {
+                      if (isCorrect) st = { ...st, ...styles.correct };
+                      else if (picked && !isCorrect) st = { ...st, ...styles.wrong };
+                    }
+                    return (
+                      <button key={idx} onClick={() => choose(idx)} style={st}>
+                        {idx + 1}. {op}
+                      </button>
+                    );
+                  })}
+                </div>
 
-        {phase === 'done' && (
-          <div style={styles.card}>
-            <div><b>연습 종료!</b> 점수: {score} / {words.length}</div>
-
-            {wrongs.length > 0 ? (
-              <>
-                <div style={{ marginTop: 12, fontWeight: 700 }}>오답 목록 (정답 포함)</div>
-                {wrongs.map((w, idx) => (
-                  <div key={idx} style={styles.wrongItem}>
-                    <div><b>{idx + 1}. {w.word.term_en}</b> <span style={styles.tagWrong}>오답</span></div>
-                    <div>정답: {w.correct}</div>
-                    <div>내 답: {w.your || '(무응답)'}</div>
+                <div style={styles.footer}>
+                  <div style={styles.info}>
+                    {chosen >= 0
+                      ? (chosen === ansIdx ? '정답!' : `오답 😿  정답: ${opts[ansIdx]}`)
+                      : '보기 중 하나를 선택하세요.'}
                   </div>
-                ))}
-              </>
-            ) : (
-              <div style={{ marginTop: 12 }}>오답이 없어요. 훌륭해요! 🐰</div>
+                  <button style={styles.next} onClick={next} disabled={chosen < 0}>다음</button>
+                </div>
+              </div>
             )}
 
-            <div style={styles.btnRow}>
-              <button style={styles.next} onClick={() => nav('/study')}>범위 선택으로</button>
-              <button style={styles.next} onClick={() => nav('/dashboard')}>대시보드</button>
-            </div>
+            {/* 종료 카드 */}
+            {phase === 'done' && (
+              <div style={styles.card}>
+                <div><b>연습 종료!</b> 점수: {score} / {words.length}</div>
+
+                {wrongs.length > 0 ? (
+                  <>
+                    <div style={{ marginTop: 12, fontWeight: 700 }}>오답 목록 (정답 포함)</div>
+                    {wrongs.map((w, idx) => (
+                      <div key={idx} style={styles.wrongItem}>
+                        <div><b>{idx + 1}. {w.word.term_en}</b> <span style={styles.tagWrong}>오답</span></div>
+                        <div>정답: {w.correct}</div>
+                        <div>내 답: {w.your || '(무응답)'}</div>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div style={{ marginTop: 12 }}>오답이 없어요. 훌륭해요! 🐰</div>
+                )}
+
+                <div style={styles.btnRow}>
+                  <button style={styles.next} onClick={() => nav('/study')}>범위 선택으로</button>
+                  <button style={styles.next} onClick={() => nav('/dashboard')}>대시보드</button>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
-    </div>
+    </StudentShell>
   );
 }

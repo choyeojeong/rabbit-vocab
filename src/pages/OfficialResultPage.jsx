@@ -1,9 +1,11 @@
+// src/pages/OfficialResultPage.jsx
 import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
 import "dayjs/locale/ko";
 import { supabase } from "../utils/supabaseClient";
 import { getSession } from "../utils/session";
+import StudentShell from "./StudentShell";
 
 dayjs.locale("ko");
 
@@ -28,7 +30,11 @@ export default function OfficialResultPage() {
           .eq("id", id)
           .maybeSingle();
         if (e1) throw e1;
-        if (!s) { alert("세션을 찾을 수 없습니다."); nav("/exam/official/results"); return; }
+        if (!s) {
+          alert("세션을 찾을 수 없습니다.");
+          nav("/exam/official/results");
+          return;
+        }
 
         // 본인 확인 + 확정 여부
         if (me?.id && s.student_id !== me.id) {
@@ -59,7 +65,17 @@ export default function OfficialResultPage() {
     })();
   }, [id, me?.id, nav]);
 
-  if (loading) return <div style={{ padding: 24 }}>불러오는 중…</div>;
+  if (loading) {
+    return (
+      <StudentShell>
+        <div className="vh-100 centered with-safe" style={{ width: "100%" }}>
+          <div className="student-container">
+            <div className="student-card stack">불러오는 중…</div>
+          </div>
+        </div>
+      </StudentShell>
+    );
+  }
   if (!sess) return null;
 
   const range = sess.chapters_text || `${sess.chapter_start ?? "?"}-${sess.chapter_end ?? "?"}`;
@@ -69,36 +85,46 @@ export default function OfficialResultPage() {
   const wrongItems = items.filter((it) => !it.final_ok);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#fff5f8", padding: 24 }}>
-      <div style={{ maxWidth: 900, margin: "0 auto", background: "#fff", borderRadius: 12, padding: 20, boxShadow: "0 8px 24px rgba(255,192,217,.35)" }}>
-        <h2 style={{ marginTop: 0, color: "#ff6fa3" }}>공식시험 결과</h2>
+    <StudentShell>
+      <div className="vh-100 centered with-safe" style={{ width: "100%" }}>
+        <div className="student-container">
+          <div className="student-card stack">
+            {/* 상단 요약 */}
+            <div className="student-text" style={{ color: "#444", marginBottom: 4 }}>
+              <div>책/범위: <b>{sess.book}</b> / <b>{range}</b></div>
+              <div>
+                문제 수: <b>{total}</b> · 틀린 수: <b>-{wrong}</b> · 최종: <b>{sess.final_pass ? "통과" : "불통과"}</b>
+              </div>
+              <div>검수 완료: {dayjs(sess.teacher_confirmed_at).format("YYYY.MM.DD HH:mm")}</div>
+              <div>커트라인: -{sess.cutoff_miss}컷</div>
+            </div>
 
-        <div style={{ color: "#444", marginBottom: 12 }}>
-          <div>책/범위: <b>{sess.book}</b> / <b>{range}</b></div>
-          <div>문제 수: <b>{total}</b> · 틀린 수: <b>-{wrong}</b> · 최종: <b>{sess.final_pass ? "통과" : "불통과"}</b></div>
-          <div>검수 완료: {dayjs(sess.teacher_confirmed_at).format("YYYY.MM.DD HH:mm")}</div>
-          <div>커트라인: -{sess.cutoff_miss}컷</div>
-        </div>
+            {/* 틀린 문제 */}
+            <div style={{ borderTop: "1px solid #ffe1ec", paddingTop: 12 }}>
+              <div className="student-text" style={{ fontWeight: 700, marginBottom: 6 }}>
+                틀린 문제
+              </div>
+              {wrongItems.length === 0 ? (
+                <div className="student-text" style={{ color: "#888" }}>틀린 문제가 없습니다. 🎉</div>
+              ) : (
+                <ul style={{ paddingLeft: 18 }}>
+                  {wrongItems.map((it) => (
+                    <li key={it.order_index} style={{ margin: "6px 0" }}>
+                      <b>{it.order_index}. {it.term_en}</b> — 정답: {it.meaning_ko} / 내 답: {it.student_answer || "—"}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
-        <div style={{ borderTop: "1px solid #ffe1ec", paddingTop: 12 }}>
-          <h3 style={{ margin: "8px 0 6px" }}>틀린 문제</h3>
-          {wrongItems.length === 0 ? (
-            <div style={{ color: "#888" }}>틀린 문제가 없습니다. 🎉</div>
-          ) : (
-            <ul style={{ paddingLeft: 18 }}>
-              {wrongItems.map((it) => (
-                <li key={it.order_index} style={{ margin: "6px 0" }}>
-                  <b>{it.order_index}. {it.term_en}</b> — 정답: {it.meaning_ko} / 내 답: {it.student_answer || "—"}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <Link to="/exam/official/results" style={{ color: "#4361ee", textDecoration: "none" }}>← 결과 목록</Link>
+            <div style={{ marginTop: 14 }}>
+              <Link to="/exam/official/results" style={{ color: "#4361ee", textDecoration: "none" }}>
+                ← 결과 목록
+              </Link>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+    </StudentShell>
   );
 }
