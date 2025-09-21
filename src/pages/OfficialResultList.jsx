@@ -1,5 +1,5 @@
 // src/pages/OfficialResultList.jsx
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
 import "dayjs/locale/ko";
@@ -9,13 +9,9 @@ import StudentShell from "./StudentShell";
 
 dayjs.locale("ko");
 
-function norm(v) {
-  return (v ?? "").toString().trim().toLowerCase();
-}
-
 export default function OfficialResultList() {
   const nav = useNavigate();
-  const me = getSession(); // { id, name, ... } 형태 가정
+  const me = getSession(); // { id, name, ... }
   const studentId = me?.id || null;
   const studentName = (me?.name || "").trim();
 
@@ -23,51 +19,35 @@ export default function OfficialResultList() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // 시간 제한(기본 90시간) / 해제 토글
-  const [hours, setHours] = useState(90);
-  const [noTimeLimit, setNoTimeLimit] = useState(false);
-
-  const sinceISO = useMemo(() => {
-    if (noTimeLimit) return null;
-    const t = new Date(Date.now() - 1000 * 60 * 60 * (Number(hours) || 90));
-    return t.toISOString();
-  }, [hours, noTimeLimit]);
-
   const fetchRows = useCallback(async () => {
+    // 로그인 여부 확인
     if (!studentId && !studentName) return;
     try {
       setLoading(true);
       setErr("");
 
-      // 기본 쿼리: mode만 제한하고 넓게 가져옴
+      // 기본 쿼리: 공식시험 + 확정된 결과만
       let q = supabase
         .from("test_sessions")
         .select(
           "id, status, mode, book, chapters_text, chapter_start, chapter_end, num_questions, final_score, final_pass, teacher_confirmed_at, created_at, student_id, student_name"
         )
         .eq("mode", "official")
-        // 정렬: 확정 시각 우선, 없으면 생성 시각
+        .eq("status", "finalized")
         .order("teacher_confirmed_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
 
-      // 학생 매칭: id 우선, 없으면 name 보조
-      const ors = [];
-      if (studentId) ors.push(`student_id.eq.${studentId}`);
-      if (studentName) ors.push(`student_name.eq.${encodeURIComponent(studentName)}`);
-      if (ors.length) q = q.or(ors.join(","));
-
-      // 시간 제한(확정시각 또는 생성시각 중 하나라도 범위 내면 포함)
-      if (sinceISO) {
-        q = q.or(`teacher_confirmed_at.gte.${sinceISO},created_at.gte.${sinceISO}`);
+      // 학생 매칭: id 우선, 없으면 name으로
+      if (studentId) {
+        q = q.eq("student_id", studentId);
+      } else if (studentName) {
+        q = q.eq("student_name", studentName);
       }
 
       const { data, error } = await q;
       if (error) throw error;
 
-      // 화면에서 status 정규화하여 'finalized'만 남김 (공백/대소문자 오염 방지)
-      const filtered = (data || []).filter((r) => norm(r.status) === "finalized");
-
-      setRows(filtered);
+      setRows(data || []);
     } catch (e) {
       console.error(e);
       setErr(e?.message || "결과를 불러오는 중 오류가 발생했습니다.");
@@ -75,13 +55,13 @@ export default function OfficialResultList() {
     } finally {
       setLoading(false);
     }
-  }, [studentId, studentName, sinceISO]);
+  }, [studentId, studentName]);
 
   useEffect(() => {
     fetchRows();
   }, [fetchRows]);
 
-  // 비로그인 상태: 로그인 유도 카드
+  // 비로그인 상태: 로그인 유도
   if (!studentId && !studentName) {
     return (
       <StudentShell>
@@ -111,40 +91,8 @@ export default function OfficialResultList() {
       <div className="vh-100 centered with-safe" style={{ width: "100%", color: "#000" }}>
         <div className="student-container">
           <div className="student-card stack">
-            {/* 상단: 인사 + 새로고침 + 시간필터 */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 8 }}>
-              <div className="student-text" style={{ color: "#000" }}>
-                {studentName ? <>안녕하세요, <b>{studentName}</b> 학생! 🐰</> : "세션 정보를 불러오는 중…"}
-              </div>
-
-              {/* 시간 제한 해제 토글 */}
-              <label style={{ fontSize: 13, color: "#555", display: "flex", alignItems: "center", gap: 6 }}>
-                <input
-                  type="checkbox"
-                  checked={noTimeLimit}
-                  onChange={(e) => setNoTimeLimit(e.target.checked)}
-                />
-                시간 제한 해제
-              </label>
-
-              {/* 시간 범위 입력 */}
-              {!noTimeLimit && (
-                <label style={{ fontSize: 13, color: "#555", display: "flex", alignItems: "center", gap: 6 }}>
-                  최근
-                  <input
-                    type="number"
-                    min={1}
-                    max={240}
-                    value={hours}
-                    onChange={(e) => setHours(e.target.value)}
-                    style={{ width: 64, padding: "4px 6px", borderRadius: 8, border: "1px solid #ffd3e3" }}
-                  />
-                  시간
-                </label>
-              )}
-            </div>
-
-            <div style={{ marginTop: 8 }}>
+            {/* 상단: 새로고침만 */}
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
                 onClick={fetchRows}
                 className="student-button"
