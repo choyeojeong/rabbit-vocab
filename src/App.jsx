@@ -1,5 +1,6 @@
 // src/App.jsx
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -18,13 +19,36 @@ import TeacherManagePage from './pages/TeacherManagePage.jsx';
 import TeacherReviewList from './pages/TeacherReviewList';
 import TeacherReviewSession from './pages/TeacherReviewSession';
 import TeacherToday from './pages/TeacherToday';
-import TeacherFocusMonitor from './pages/TeacherFocusMonitor.jsx'; // ✅ 이탈 감지 모니터 추가
+import TeacherFocusMonitor from './pages/TeacherFocusMonitor.jsx'; // ✅ 이탈 감지 모니터
 
-import { getSession } from './utils/session';
+import { ensureLiveStudent } from './utils/session';
 
+/**
+ * ✅ 삭제된 계정/없는 계정의 "유령 로그인"을 막기 위한 보호 라우트
+ * - 로컬 세션이 있어도 DB(profiles)에 실제 존재하는지 비동기로 확인
+ * - 존재하지 않으면 세션을 비우고 로그인 페이지로 보냄
+ */
 function Protected({ children }) {
-  const s = getSession();
-  if (!s) return <Navigate to="/" replace />;
+  const nav = useNavigate();
+  const [status, setStatus] = useState<'checking' | 'ok' | 'redirect'>('checking');
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const s = await ensureLiveStudent(); // 없으면 내부에서 세션도 제거
+      if (!alive) return;
+      if (!s) {
+        setStatus('redirect');
+        nav('/', { replace: true });
+      } else {
+        setStatus('ok');
+      }
+    })();
+    return () => { alive = false; };
+  }, [nav]);
+
+  if (status === 'checking') return null; // 검증 중엔 렌더 안 함(깜빡임 방지)
+  if (status === 'redirect') return null; // 네비게이트 직후
   return children;
 }
 

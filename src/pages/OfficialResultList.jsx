@@ -4,29 +4,43 @@ import { Link, useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
 import "dayjs/locale/ko";
 import { supabase } from "../utils/supabaseClient";
-import { getSession } from "../utils/session";
+import { ensureLiveStudent, getSession } from "../utils/session";
 import StudentShell from "./StudentShell";
 
 dayjs.locale("ko");
 
 export default function OfficialResultList() {
   const nav = useNavigate();
-  const me = getSession(); // { id, name, ... }
-  const studentId = me?.id || null;
-  const studentName = (me?.name || "").trim();
+
+  // ✅ 세션은 state로 들고와서 렌더/의존성 안전하게
+  const [who, setWho] = useState(() => {
+    const me = getSession();
+    return { id: me?.id || null, name: (me?.name || "").trim() };
+  });
 
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  // ✅ 마운트 시 한 번 더 “실존 학생” 검증 (PWA 캐시로 오래된 세션 방지)
+  useEffect(() => {
+    (async () => {
+      const s = await ensureLiveStudent();
+      if (!s) {
+        nav("/", { replace: true });
+        return;
+      }
+      setWho({ id: s.id, name: (s.name || "").trim() });
+    })();
+  }, [nav]);
+
   const fetchRows = useCallback(async () => {
-    // 로그인 여부 확인
-    if (!studentId && !studentName) return;
+    if (!who.id && !who.name) return;
     try {
       setLoading(true);
       setErr("");
 
-      // 기본 쿼리: 공식시험 + 확정된 결과만
+      // ✅ 공식시험 + 확정본만
       let q = supabase
         .from("test_sessions")
         .select(
@@ -34,15 +48,17 @@ export default function OfficialResultList() {
         )
         .eq("mode", "official")
         .eq("status", "finalized")
+        // ✅ id OR name 둘 다 허용 (id가 가장 신뢰도 높음)
+        .or(
+          [
+            who.id ? `student_id.eq.${who.id}` : null,
+            who.name ? `student_name.eq.${who.name}` : null,
+          ]
+            .filter(Boolean)
+            .join(",")
+        )
         .order("teacher_confirmed_at", { ascending: false, nullsFirst: false })
         .order("created_at", { ascending: false });
-
-      // 학생 매칭: id 우선, 없으면 name으로
-      if (studentId) {
-        q = q.eq("student_id", studentId);
-      } else if (studentName) {
-        q = q.eq("student_name", studentName);
-      }
 
       const { data, error } = await q;
       if (error) throw error;
@@ -55,14 +71,14 @@ export default function OfficialResultList() {
     } finally {
       setLoading(false);
     }
-  }, [studentId, studentName]);
+  }, [who.id, who.name]);
 
   useEffect(() => {
     fetchRows();
   }, [fetchRows]);
 
   // 비로그인 상태: 로그인 유도
-  if (!studentId && !studentName) {
+  if (!who.id && !who.name) {
     return (
       <StudentShell>
         <div className="vh-100 centered with-safe" style={{ width: "100%", color: "#000" }}>
