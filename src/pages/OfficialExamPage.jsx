@@ -28,8 +28,16 @@ export default function OfficialExamPage() {
   const book = q.get('book');
   const start = Number(q.get('start'));
   const end = Number(q.get('end'));
-  const chaptersParam = q.get('chapters'); // 권장
+  const chaptersParam = q.get('chapters'); // 선호 방식 (예: "4-6,8,10")
   const me = getSession();
+
+  // 로그인/세션 가드
+  useEffect(() => {
+    if (!me?.id) {
+      alert('로그인이 필요합니다. 다시 로그인해 주세요.');
+      nav('/');
+    }
+  }, [me, nav]);
 
   // 설정
   const [numQ, setNumQ] = useState(30);
@@ -58,7 +66,7 @@ export default function OfficialExamPage() {
   // 단어 로드
   useEffect(() => {
     (async () => {
-      if (!book || (!chaptersParam && (!start || !end))) return;
+      if (!book || (!chaptersParam && (!Number.isFinite(start) || !Number.isFinite(end)))) return;
       let range = [];
       if (chaptersParam) {
         const list = parseChapterInput(chaptersParam);
@@ -74,7 +82,7 @@ export default function OfficialExamPage() {
   useExamFocusGuard({
     sessionId,
     studentId: me?.id,
-    enableAlert: true
+    enableAlert: true,
   });
 
   function computeChapterBounds() {
@@ -85,21 +93,38 @@ export default function OfficialExamPage() {
     if (Number.isFinite(start) && Number.isFinite(end)) {
       return { chapter_start: Math.min(start, end), chapter_end: Math.max(start, end) };
     }
-    throw new Error('챕터 범위를 계산할 수 없습니다. (입력 형식 확인)');
+    throw new Error('챕터 범위를 계산할 수 없습니다. (입력 형식을 확인하세요)');
+  }
+
+  function computeChaptersText() {
+    if (chaptersParam && chaptersParam.trim()) return chaptersParam.trim(); // 자유형 입력 그대로 저장
+    if (Number.isFinite(start) && Number.isFinite(end)) return `${Math.min(start, end)}~${Math.max(start, end)}`;
+    return '';
   }
 
   async function startExam() {
-    if (!words.length) return alert('선택한 범위에 단어가 없습니다.');
-    const n = Math.max(1, Math.min(numQ, words.length));
+    if (!me?.id) {
+      alert('로그인이 필요합니다. 다시 로그인해 주세요.');
+      return nav('/');
+    }
+    if (!book) {
+      return alert('잘못된 접근입니다. (책 정보 없음)');
+    }
+    if (!words.length) {
+      return alert('선택한 범위에 단어가 없습니다.');
+    }
+
+    const n = Math.max(1, Math.min(Number(numQ) || 0, words.length));
     const chosen = sampleN(words, n);
 
-    // 세션을 먼저 생성해 sessionId 확보 (이탈 로그 위해 필요)
+    // 세션 먼저 생성(draft) → sessionId 확보(이탈 로그/제출 업데이트용)
     let bounds, chaptersText;
     try {
       bounds = computeChapterBounds();
-      chaptersText = chaptersParam ? chaptersParam : `${start}~${end}강`;
+      chaptersText = computeChaptersText();
+      if (!chaptersText) throw new Error('챕터 표기 생성 실패');
     } catch (e) {
-      return alert(e.message);
+      return alert(e.message || '범위 계산 중 오류');
     }
 
     // 프로필(학생 이름/담임)
@@ -112,37 +137,43 @@ export default function OfficialExamPage() {
         .maybeSingle();
       profileName = profile?.name || me?.name || '';
       profileTeacher = profile?.teacher_name || null;
-    } catch {}
+    } catch {
+      // 무시 (빈 값 허용)
+    }
 
     try {
+      const payload = {
+        mode: 'official',
+        status: 'draft',            // ✅ 시작은 반드시 draft
+        student_id: me?.id,         // ✅ NOT NULL 가드
+        student_name: profileName,  // (NULL 허용이면 비워도 OK)
+        teacher_name: profileTeacher,
+        book,
+        chapters_text: chaptersText,
+        chapter_start: bounds.chapter_start,
+        chapter_end: bounds.chapter_end,
+        num_questions: n,
+        cutoff_miss: Number.isFinite(cutMiss) ? cutMiss : 3,
+        duration_sec: 6,            // 고정 6초
+        auto_score: 0,              // 초기 0으로 명시 (NULL 제약 회피)
+        auto_pass: null,            // 아직 미정
+      };
+
       const { data, error } = await supabase
         .from('test_sessions')
-        .insert([{
-          mode: 'official',
-          status: 'draft',           // ✅ 시작은 draft
-          student_id: me?.id,
-          student_name: profileName,
-          teacher_name: profileTeacher,
-          book,
-          chapters_text: chaptersText,
-          chapter_start: bounds.chapter_start,
-          chapter_end: bounds.chapter_end,
-          num_questions: n,
-          cutoff_miss: cutMiss,
-          duration_sec: 6,
-          auto_score: null,
-          auto_pass: null
-        }])
+        .insert([payload])
         .select('id')
         .single();
 
       if (error) throw error;
       if (!data?.id) throw new Error('SESSION_INSERT_OK_BUT_NO_ID');
-
       setSessionId(data.id);
     } catch (err) {
-      console.error('[OfficialExam] pre-create session failed:', err);
-      alert('시험 세션 생성 중 오류가 발생했습니다. 다시 시도해 주세요.');
+      console.error('[OfficialExam] session insert error:', err);
+      alert(
+        `시험 세션 생성 중 오류가 발생했습니다. 다시 시도해 주세요.\n` +
+        (err?.message ? `\n(detail: ${err.message})` : '')
+      );
       return;
     }
 
@@ -162,7 +193,7 @@ export default function OfficialExamPage() {
   useEffect(() => {
     if (phase === 'exam') {
       submittedRef.current = false;
-      setInputKey((k) => k + 1);
+      setInputKey(k => k + 1);
     }
   }, [phase, i]);
 
@@ -189,7 +220,9 @@ export default function OfficialExamPage() {
       await supabase.from('study_logs').insert([
         { student_id: me?.id, book, chapter: word?.chapter, word_id: word?.id, action, payload: { mode: 'official' } },
       ]);
-    } catch {}
+    } catch {
+      // 로깅 실패는 치명적이지 않음
+    }
   }
 
   // 한 문항 제출
@@ -222,16 +255,14 @@ export default function OfficialExamPage() {
   }
 
   async function finalizeAndSend(finalResults) {
-    // 이미 startExam에서 sessionId를 만들었으므로, 여기서는 UPDATE + items INSERT만 수행
     let sid = sessionId;
 
-    // 혹시나 세션이 없으면(에러 복구용) 생성 (draft로)
+    // 예외 복구: 세션이 없다면(draft로) 즉시 생성
     if (!sid) {
       try {
         const bounds = computeChapterBounds();
-        const chaptersText = chaptersParam ? chaptersParam : `${start}~${end}강`;
+        const chaptersText = computeChaptersText();
 
-        // 프로필
         let profileName = '', profileTeacher = null;
         try {
           const { data: profile } = await supabase
@@ -247,7 +278,7 @@ export default function OfficialExamPage() {
           .from('test_sessions')
           .insert([{
             mode: 'official',
-            status: 'draft', // ✅ fallback도 draft로
+            status: 'draft',
             student_id: me?.id,
             student_name: profileName,
             teacher_name: profileTeacher,
@@ -255,11 +286,11 @@ export default function OfficialExamPage() {
             chapters_text: chaptersText,
             chapter_start: bounds.chapter_start,
             chapter_end: bounds.chapter_end,
-            num_questions: seq.length,
-            cutoff_miss: cutMiss,
+            num_questions: (finalResults?.length || seq.length || 0) || 1,
+            cutoff_miss: Number.isFinite(cutMiss) ? cutMiss : 3,
             duration_sec: 6,
-            auto_score: null,
-            auto_pass: null
+            auto_score: 0,
+            auto_pass: null,
           }])
           .select('id')
           .single();
@@ -276,14 +307,15 @@ export default function OfficialExamPage() {
 
     // 자동 점수/통과 계산
     const autoScore = (finalResults || []).reduce((acc, r) => acc + (r.ok ? 1 : 0), 0);
-    const autoPass = (seq.length - autoScore) <= cutMiss;
+    const total = seq.length || (finalResults?.length ?? 0);
+    const autoPass = (total - autoScore) <= (Number.isFinite(cutMiss) ? cutMiss : 3);
 
     // 1) 세션 UPDATE: 제출 시점에만 submitted로 전환
     try {
       const { error } = await supabase
         .from('test_sessions')
         .update({
-          status: 'submitted',        // ✅ 여기서만 submitted
+          status: 'submitted',  // ✅ 제출 순간에만 submitted
           auto_score: autoScore,
           auto_pass: autoPass,
         })
@@ -307,10 +339,12 @@ export default function OfficialExamPage() {
         meaning_ko: r?.word?.meaning_ko ?? '',
         student_answer: r?.your ?? '',
         auto_ok: !!r?.ok,
-        final_ok: null
+        final_ok: null,
       }));
-      const { error } = await supabase.from('test_items').insert(rows);
-      if (error) throw error;
+      if (rows.length > 0) {
+        const { error } = await supabase.from('test_items').insert(rows);
+        if (error) throw error;
+      }
     } catch (err) {
       console.error('[OfficialExam] items insert failed:', err);
       alert(`제출 중 오류(문항 저장): ${err?.message || err}`);
@@ -321,7 +355,6 @@ export default function OfficialExamPage() {
     setPhase('submitted');
   }
 
-  // 잘못된 진입 처리
   if (!book) {
     return (
       <StudentShell>
@@ -339,14 +372,14 @@ export default function OfficialExamPage() {
       <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
         <div className="student-container">
           <div className="student-card stack">
-            {/* config 단계: 책/범위/문항수/컷 설정 */}
+            {/* config 단계 */}
             {phase === 'config' && (
               <>
                 <div className="student-row">
                   <div>
                     <div style={{ fontSize: 13, color: '#444' }}>책 / 범위</div>
                     <div style={styles.info}>
-                      {book} | {chaptersParam ? `챕터: ${chaptersParam}` : `${start}~${end}강`}
+                      {book} | {chaptersParam ? `챕터: ${chaptersParam}` : `${Math.min(start, end)}~${Math.max(start, end)}`}
                     </div>
                   </div>
                   <div />
@@ -379,7 +412,7 @@ export default function OfficialExamPage() {
               </>
             )}
 
-            {/* exam 단계: 타이머 + 제출 */}
+            {/* exam 단계 */}
             {phase === 'exam' && (
               <div style={{ marginTop: 6 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -409,7 +442,7 @@ export default function OfficialExamPage() {
               </div>
             )}
 
-            {/* submitted 단계: 안내 */}
+            {/* submitted 단계 */}
             {phase === 'submitted' && (
               <div>
                 <div style={styles.warn}>
