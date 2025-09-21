@@ -9,7 +9,7 @@ import { useDing } from "../utils/ding";
 dayjs.locale("ko");
 
 const styles = {
-  page: { minHeight: "100vh", background: "#fff5f8", padding: 24, color: "#000" }, // 글자색 검정
+  page: { minHeight: "100vh", background: "#fff5f8", padding: 24, color: "#000" },
   box: { maxWidth: 900, margin: "0 auto", background: "#fff", borderRadius: 12, padding: 20, boxShadow: "0 8px 24px rgba(255,192,217,.35)" },
   title: { fontSize: 22, fontWeight: 800, color: "#ff6fa3", margin: 0 },
   card: { border: "1px solid #ffd3e3", borderRadius: 12, padding: 14, marginTop: 10, color: "#000" },
@@ -100,22 +100,38 @@ export default function TeacherReviewList() {
     return () => { if (notifTimerRef.current) clearTimeout(notifTimerRef.current); };
   }, [fetchList]);
 
-  // 실시간 구독
+  // ✅ 실시간 구독: UPDATE(→ submitted 전환) + INSERT(제출 시 바로 넣는 흐름 대비)
   useEffect(() => {
-    const ch = supabase
-      .channel("teacher-new-submissions")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "test_sessions", filter: "mode=eq.official" },
-        async (payload) => {
-          const s = payload.new || {};
-          if (normalizeStatus(s.status) !== "submitted") return;
-          if (seenIdsRef.current.has(s.id)) return;
-          seenIdsRef.current.add(s.id);
-          await showNotif(s);
-          fetchList();
-        }
-      );
+    const ch = supabase.channel("teacher-new-submissions");
+
+    // A) UPDATE: draft → submitted 전환 시 알림/갱신
+    ch.on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "test_sessions", filter: "mode=eq.official" },
+      async (payload) => {
+        const s = payload.new || {};
+        if (normalizeStatus(s.status) !== "submitted") return;
+        if (seenIdsRef.current.has(s.id)) return;
+        seenIdsRef.current.add(s.id);
+        await showNotif(s);
+        fetchList();
+      }
+    );
+
+    // B) INSERT: 제출 시점에 INSERT되는 케이스를 대비
+    ch.on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "test_sessions", filter: "mode=eq.official" },
+      async (payload) => {
+        const s = payload.new || {};
+        if (normalizeStatus(s.status) !== "submitted") return; // draft 시작은 무시
+        if (seenIdsRef.current.has(s.id)) return;
+        seenIdsRef.current.add(s.id);
+        await showNotif(s);
+        fetchList();
+      }
+    );
+
     ch.subscribe((status) => setRtStatus(`실시간: ${status}`));
     return () => supabase.removeChannel(ch);
   }, [fetchList, showNotif]);
@@ -157,6 +173,20 @@ export default function TeacherReviewList() {
             <input type="checkbox" checked={noTimeLimit} onChange={(e) => setNoTimeLimit(e.target.checked)} />
             시간 제한 해제
           </label>
+          {!noTimeLimit && (
+            <label style={{ fontSize: 13, color: "#555", display: "flex", alignItems: "center", gap: 6 }}>
+              최근
+              <input
+                type="number"
+                min={1}
+                max={240}
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+                style={{ width: 64, padding: "4px 6px", borderRadius: 8, border: "1px solid #ffd3e3" }}
+              />
+              시간
+            </label>
+          )}
         </div>
 
         {error && <div style={{ marginTop: 8, color: "#c1121f", fontSize: 13 }}>오류: {error}</div>}

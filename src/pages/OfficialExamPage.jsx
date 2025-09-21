@@ -119,6 +119,7 @@ export default function OfficialExamPage() {
         .from('test_sessions')
         .insert([{
           mode: 'official',
+          status: 'draft',           // ✅ 시작은 draft
           student_id: me?.id,
           student_name: profileName,
           teacher_name: profileTeacher,
@@ -129,7 +130,6 @@ export default function OfficialExamPage() {
           num_questions: n,
           cutoff_miss: cutMiss,
           duration_sec: 6,
-          status: 'submitted',     // 제출 전이지만 enum 제약상 임시로 사용
           auto_score: null,
           auto_pass: null
         }])
@@ -225,7 +225,7 @@ export default function OfficialExamPage() {
     // 이미 startExam에서 sessionId를 만들었으므로, 여기서는 UPDATE + items INSERT만 수행
     let sid = sessionId;
 
-    // 혹시나 세션이 없으면(에러 복구용) 생성
+    // 혹시나 세션이 없으면(에러 복구용) 생성 (draft로)
     if (!sid) {
       try {
         const bounds = computeChapterBounds();
@@ -247,6 +247,7 @@ export default function OfficialExamPage() {
           .from('test_sessions')
           .insert([{
             mode: 'official',
+            status: 'draft', // ✅ fallback도 draft로
             student_id: me?.id,
             student_name: profileName,
             teacher_name: profileTeacher,
@@ -257,7 +258,6 @@ export default function OfficialExamPage() {
             num_questions: seq.length,
             cutoff_miss: cutMiss,
             duration_sec: 6,
-            status: 'submitted',
             auto_score: null,
             auto_pass: null
           }])
@@ -278,14 +278,14 @@ export default function OfficialExamPage() {
     const autoScore = (finalResults || []).reduce((acc, r) => acc + (r.ok ? 1 : 0), 0);
     const autoPass = (seq.length - autoScore) <= cutMiss;
 
-    // 1) 세션 업데이트
+    // 1) 세션 UPDATE: 제출 시점에만 submitted로 전환
     try {
       const { error } = await supabase
         .from('test_sessions')
         .update({
+          status: 'submitted',        // ✅ 여기서만 submitted
           auto_score: autoScore,
           auto_pass: autoPass,
-          // status는 그대로 'submitted' (교사 검수 시 'finalized')
         })
         .eq('id', sid);
       if (error) throw error;
