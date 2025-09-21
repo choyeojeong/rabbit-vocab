@@ -18,14 +18,19 @@
     <!-- iOS 홈화면 아이콘 -->
     <link rel="apple-touch-icon" href="/icons/apple-180.png" />
 
-    <!-- PWA: 테마 컬러 (라이트/다크 대응) -->
-    <meta name="theme-color" content="#ff6fa3" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#ff6fa3" media="(prefers-color-scheme: dark)" />
+    <!-- PWA: 테마 컬러 -->
+    <meta name="theme-color" content="#ff6fa3" />
 
-    <!-- iOS PWA 강화 -->
+    <!-- ✅ 표준(크롬/안드로이드): 권장 -->
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- iOS PWA (유지해도 됨) -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Rabbit" />
+
+    <!-- 선택: 전화번호 자동링크 방지(폼 입력 시 편의) -->
+    <meta name="format-detection" content="telephone=no" />
 
     <!-- Windows 타일 색상 (선택) -->
     <meta name="msapplication-TileColor" content="#fff5f8" />
