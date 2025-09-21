@@ -1,7 +1,13 @@
 // src/pages/MockExamPage.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { fetchWordsInRange, fetchWordsByChapters, parseChapterInput, sampleN } from '../utils/vocab';
+import {
+  fetchWordsInRange,
+  fetchWordsByChapters,
+  parseChapterInput,
+  sampleN,
+  ensureArray,
+} from '../utils/vocab';
 import { isAnswerCorrect } from '../utils/textEval';
 import { supabase } from '../utils/supabaseClient';
 import { getSession } from '../utils/session';
@@ -28,11 +34,26 @@ function useQuery() {
 
 export default function MockExamPage() {
   const nav = useNavigate();
+  const loc = useLocation();
   const q = useQuery();
-  const book = q.get('book');
-  const start = Number(q.get('start'));
-  const end = Number(q.get('end'));
-  const chaptersParam = q.get('chapters');
+
+  // 쿼리 파라미터(레거시) 및 state(신규) 모두 지원
+  const bookFromQuery = q.get('book');
+  const chaptersParam = q.get('chapters'); // "4-8,10" 형태
+  const startParam = q.get('start');
+  const endParam = q.get('end');
+
+  const book =
+    (loc.state && loc.state.book) ||
+    (bookFromQuery || '');
+
+  const chaptersFromState = ensureArray(loc.state?.chapters); // number[] or []
+  const chaptersFromQuery = parseChapterInput(chaptersParam); // number[] or []
+
+  // 범위 방식을 위한 start/end (숫자 or NaN)
+  const start = Number(startParam);
+  const end = Number(endParam);
+
   const me = getSession();
 
   // 설정 단계
@@ -58,25 +79,53 @@ export default function MockExamPage() {
   const [corrects, setCorrects] = useState(0);
   const [results, setResults] = useState([]);
 
-  useEffect(() => { answerRef.current = answer; }, [answer]);
+  // 실제 사용할 챕터 배열(우선순위: state > query > 없음)
+  const chapterList = useMemo(() => {
+    if (chaptersFromState.length) return chaptersFromState;
+    if (chaptersFromQuery.length) return chaptersFromQuery;
+    return [];
+  }, [chaptersFromState, chaptersFromQuery]);
 
   useEffect(() => {
-    (async () => {
-      if (!book || (!chaptersParam && (!start || !end))) return;
-      let range = [];
-      if (chaptersParam) {
-        const list = parseChapterInput(chaptersParam);
-        range = await fetchWordsByChapters(book, list);
-      } else {
-        range = await fetchWordsInRange(book, start, end);
-      }
-      setWords(range);
-    })();
-  }, [book, start, end, chaptersParam]);
+    answerRef.current = answer;
+  }, [answer]);
 
+  // 단어 로드: chapterList가 있으면 in(...) 조회, 아니면 start~end 범위 조회
+  useEffect(() => {
+    (async () => {
+      if (!book) return setWords([]);
+
+      // chapter 방식
+      if (chapterList.length > 0) {
+        const range = await fetchWordsByChapters(book, chapterList);
+        setWords(range || []);
+        return;
+      }
+
+      // 범위 방식(둘 다 정상 숫자일 때만)
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        const range = await fetchWordsInRange(book, start, end);
+        setWords(range || []);
+        return;
+      }
+
+      // 둘 다 아니면 빈 배열
+      setWords([]);
+    })();
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book, chapterList.join(','), start, end]);
+
+  // 시험 시작
   function startExam() {
     if (!words.length) return alert('선택한 범위에 단어가 없습니다.');
-    const chosen = sampleN(words, numQ);
+    // 입력 유효화
+    const n = Math.max(1, Math.min(Number(numQ) || 0, 999));
+    const c = Math.max(0, Math.min(Number(cutMiss) || 0, 999));
+    if (n !== numQ) setNumQ(n);
+    if (c !== cutMiss) setCutMiss(c);
+
+    const chosen = sampleN(words, n);
     setSeq(chosen);
     setI(0);
     setCorrects(0);
@@ -89,6 +138,7 @@ export default function MockExamPage() {
     setTimeout(() => inputRef.current?.focus(), 50);
   }
 
+  // 문항 전환 시 입력 초기화
   useEffect(() => {
     if (phase === 'exam') {
       submittedRef.current = false;
@@ -101,7 +151,8 @@ export default function MockExamPage() {
   useEffect(() => {
     if (phase !== 'exam') return;
     setRemaining(6);
-    clearInterval(timerRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+
     timerRef.current = setInterval(() => {
       setRemaining((r) => {
         if (r <= 1) {
@@ -111,7 +162,10 @@ export default function MockExamPage() {
         return r - 1;
       });
     }, 1000);
-    return () => clearInterval(timerRef.current);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
     // eslint-disable-next-line
   }, [phase, i]);
 
@@ -139,7 +193,7 @@ export default function MockExamPage() {
 
     setIsComposing(false);
     inputRef.current?.blur();
-    clearInterval(timerRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
 
     const word = seq[i];
     const your = (forcedAnswer ?? answerRef.current ?? '').toString();
@@ -181,6 +235,11 @@ export default function MockExamPage() {
     );
   }
 
+  // 상단 표시용 챕터 텍스트
+  const chapterText = chaptersParam
+    ? chaptersParam
+    : (chapterList.length ? chapterList.join(', ') : '');
+
   return (
     <StudentShell>
       <div className="vh-100 centered with-safe" style={{ width:'100%' }}>
@@ -188,7 +247,11 @@ export default function MockExamPage() {
           <div className="student-card">
             {/* 상단 간략 정보 */}
             <div style={{ color:'#444', marginBottom: 6, fontSize:13 }}>
-              책: <b>{book}</b> | {chaptersParam ? <>챕터: <b>{chaptersParam}</b></> : <>범위: <b>{start}~{end}강</b></>}
+              책: <b>{book}</b> | {chapterList.length
+                ? <>챕터: <b>{chapterText}</b></>
+                : (Number.isFinite(start) && Number.isFinite(end)
+                    ? <>범위: <b>{start}~{end}강</b></>
+                    : <>범위: <b>미지정</b></>)}
             </div>
 
             {/* 설정 */}
@@ -197,11 +260,27 @@ export default function MockExamPage() {
                 <div className="grid" style={styles.row}>
                   <div>
                     <div style={{ fontSize: 13, color: '#444' }}>문제 수</div>
-                    <input style={styles.input} value={numQ} onChange={(e) => setNumQ(Number(e.target.value || 0))} type="number" min={1} max={999} />
+                    <input
+                      style={styles.input}
+                      value={numQ}
+                      onChange={(e) => setNumQ(e.target.value)}
+                      type="number"
+                      min={1}
+                      max={999}
+                      inputMode="numeric"
+                    />
                   </div>
                   <div>
                     <div style={{ fontSize: 13, color: '#444' }}>커트라인(-X컷에서 X)</div>
-                    <input style={styles.input} value={cutMiss} onChange={(e) => setCutMiss(Number(e.target.value || 0))} type="number" min={0} max={999} />
+                    <input
+                      style={styles.input}
+                      value={cutMiss}
+                      onChange={(e) => setCutMiss(e.target.value)}
+                      type="number"
+                      min={0}
+                      max={999}
+                      inputMode="numeric"
+                    />
                   </div>
                 </div>
                 <div style={{ marginTop: 12 }}>
@@ -236,6 +315,8 @@ export default function MockExamPage() {
                         submitCurrent(answer);
                       }
                     }}
+                    autoCapitalize="none"
+                    autoCorrect="off"
                   />
                 </div>
 

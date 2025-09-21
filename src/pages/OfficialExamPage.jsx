@@ -1,7 +1,13 @@
 // src/pages/OfficialExamPage.jsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { fetchWordsInRange, fetchWordsByChapters, parseChapterInput, sampleN } from '../utils/vocab';
+import {
+  fetchWordsInRange,
+  fetchWordsByChapters,
+  parseChapterInput,
+  sampleN,
+  ensureArray,
+} from '../utils/vocab';
 import { isAnswerCorrect } from '../utils/textEval';
 import { supabase } from '../utils/supabaseClient';
 import { getSession } from '../utils/session';
@@ -24,11 +30,23 @@ function useQuery() {
 
 export default function OfficialExamPage() {
   const nav = useNavigate();
+  const loc = useLocation();
   const q = useQuery();
-  const book = q.get('book');
-  const start = Number(q.get('start'));
-  const end = Number(q.get('end'));
-  const chaptersParam = q.get('chapters'); // 선호 방식 (예: "4-6,8,10")
+
+  // 레거시 쿼리
+  const bookFromQuery = q.get('book') || '';
+  const chaptersParam = q.get('chapters'); // "4-6,8,10"
+  const startParam = q.get('start');
+  const endParam = q.get('end');
+
+  // state 우선
+  const book = (loc.state?.book) || bookFromQuery;
+  const chaptersFromState = ensureArray(loc.state?.chapters);   // number[] or []
+  const chaptersFromQuery = parseChapterInput(chaptersParam);    // number[]
+
+  const start = Number(startParam);
+  const end = Number(endParam);
+
   const me = getSession();
 
   // 로그인/세션 가드
@@ -51,6 +69,7 @@ export default function OfficialExamPage() {
   const [answer, setAnswer] = useState('');
   const answerRef = useRef('');
   const submittedRef = useRef(false);
+  const [isComposing, setIsComposing] = useState(false);
   const [inputKey, setInputKey] = useState(0);
   const [remaining, setRemaining] = useState(6);
   const timerRef = useRef(null);
@@ -61,22 +80,36 @@ export default function OfficialExamPage() {
   const [results, setResults] = useState([]); // [{word, your, ok}]
   const [sessionId, setSessionId] = useState(null); // 포커스 이탈 로그용
 
+  // 실제 사용할 챕터 배열 (우선순위: state > query > [])
+  const chapterList = useMemo(() => {
+    if (chaptersFromState.length) return chaptersFromState;
+    if (chaptersFromQuery.length) return chaptersFromQuery;
+    return [];
+  }, [chaptersFromState, chaptersFromQuery]);
+
   useEffect(() => { answerRef.current = answer; }, [answer]);
 
-  // 단어 로드
+  // 단어 로드: chapterList 있으면 in(...), 아니면 start~end
   useEffect(() => {
     (async () => {
-      if (!book || (!chaptersParam && (!Number.isFinite(start) || !Number.isFinite(end)))) return;
-      let range = [];
-      if (chaptersParam) {
-        const list = parseChapterInput(chaptersParam);
-        range = await fetchWordsByChapters(book, list);
-      } else {
-        range = await fetchWordsInRange(book, start, end);
+      if (!book) return setWords([]);
+
+      if (chapterList.length > 0) {
+        const range = await fetchWordsByChapters(book, chapterList);
+        setWords(range || []);
+        return;
       }
-      setWords(range || []);
+
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        const range = await fetchWordsInRange(book, start, end);
+        setWords(range || []);
+        return;
+      }
+
+      setWords([]);
     })();
-  }, [book, start, end, chaptersParam]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book, chapterList.join(','), start, end]);
 
   // 포커스 이탈 감지 훅 (sessionId가 생기면 활성화)
   useExamFocusGuard({
@@ -86,9 +119,8 @@ export default function OfficialExamPage() {
   });
 
   function computeChapterBounds() {
-    if (chaptersParam) {
-      const list = parseChapterInput(chaptersParam);
-      if (list.length) return { chapter_start: Math.min(...list), chapter_end: Math.max(...list) };
+    if (chapterList.length) {
+      return { chapter_start: Math.min(...chapterList), chapter_end: Math.max(...chapterList) };
     }
     if (Number.isFinite(start) && Number.isFinite(end)) {
       return { chapter_start: Math.min(start, end), chapter_end: Math.max(start, end) };
@@ -97,7 +129,8 @@ export default function OfficialExamPage() {
   }
 
   function computeChaptersText() {
-    if (chaptersParam && chaptersParam.trim()) return chaptersParam.trim(); // 자유형 입력 그대로 저장
+    if (chaptersParam && chaptersParam.trim()) return chaptersParam.trim(); // 자유형 그대로
+    if (chapterList.length) return chapterList.join(', ');
     if (Number.isFinite(start) && Number.isFinite(end)) return `${Math.min(start, end)}~${Math.max(start, end)}`;
     return '';
   }
@@ -107,14 +140,15 @@ export default function OfficialExamPage() {
       alert('로그인이 필요합니다. 다시 로그인해 주세요.');
       return nav('/');
     }
-    if (!book) {
-      return alert('잘못된 접근입니다. (책 정보 없음)');
-    }
-    if (!words.length) {
-      return alert('선택한 범위에 단어가 없습니다.');
-    }
+    if (!book) return alert('잘못된 접근입니다. (책 정보 없음)');
+    if (!words.length) return alert('선택한 범위에 단어가 없습니다.');
 
+    // 입력 유효화
     const n = Math.max(1, Math.min(Number(numQ) || 0, words.length));
+    if (n !== numQ) setNumQ(n);
+    const c = Math.max(0, Math.min(Number(cutMiss) || 0, 999));
+    if (c !== cutMiss) setCutMiss(c);
+
     const chosen = sampleN(words, n);
 
     // 세션 먼저 생성(draft) → sessionId 확보(이탈 로그/제출 업데이트용)
@@ -138,25 +172,25 @@ export default function OfficialExamPage() {
       profileName = profile?.name || me?.name || '';
       profileTeacher = profile?.teacher_name || null;
     } catch {
-      // 무시 (빈 값 허용)
+      // 무시
     }
 
     try {
       const payload = {
         mode: 'official',
-        status: 'draft',            // ✅ 시작은 반드시 draft
-        student_id: me?.id,         // ✅ NOT NULL 가드
-        student_name: profileName,  // (NULL 허용이면 비워도 OK)
+        status: 'draft',            // ✅ 시작은 draft
+        student_id: me?.id,
+        student_name: profileName,
         teacher_name: profileTeacher,
         book,
         chapters_text: chaptersText,
         chapter_start: bounds.chapter_start,
         chapter_end: bounds.chapter_end,
         num_questions: n,
-        cutoff_miss: Number.isFinite(cutMiss) ? cutMiss : 3,
+        cutoff_miss: c,
         duration_sec: 6,            // 고정 6초
-        auto_score: 0,              // 초기 0으로 명시 (NULL 제약 회피)
-        auto_pass: null,            // 아직 미정
+        auto_score: 0,
+        auto_pass: null,
       };
 
       const { data, error } = await supabase
@@ -190,10 +224,12 @@ export default function OfficialExamPage() {
     setTimeout(() => inputRef.current?.focus(), 50);
   }
 
+  // 문항 전환 시 입력 초기화
   useEffect(() => {
     if (phase === 'exam') {
       submittedRef.current = false;
       setInputKey(k => k + 1);
+      setIsComposing(false);
     }
   }, [phase, i]);
 
@@ -201,7 +237,7 @@ export default function OfficialExamPage() {
   useEffect(() => {
     if (phase !== 'exam') return;
     setRemaining(6);
-    clearInterval(timerRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       setRemaining((r) => {
         if (r <= 1) {
@@ -211,7 +247,7 @@ export default function OfficialExamPage() {
         return r - 1;
       });
     }, 1000);
-    return () => clearInterval(timerRef.current);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
     // eslint-disable-next-line
   }, [phase, i]);
 
@@ -231,8 +267,9 @@ export default function OfficialExamPage() {
     if (submittedRef.current) return;
     submittedRef.current = true;
 
+    setIsComposing(false);
     inputRef.current?.blur();
-    clearInterval(timerRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
 
     const word = seq[i];
     const your = (forcedAnswer ?? answerRef.current ?? '').toString();
@@ -367,6 +404,16 @@ export default function OfficialExamPage() {
     );
   }
 
+  // 상단 표시 텍스트
+  const chapterTextFromQuery = chaptersParam || '';
+  const chapterText = chapterList.length
+    ? chapterList.join(', ')
+    : (chapterTextFromQuery
+        ? chapterTextFromQuery
+        : (Number.isFinite(start) && Number.isFinite(end)
+            ? `${Math.min(start, end)}~${Math.max(start, end)}`
+            : '미지정'));
+
   return (
     <StudentShell>
       <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
@@ -378,9 +425,7 @@ export default function OfficialExamPage() {
                 <div className="student-row">
                   <div>
                     <div style={{ fontSize: 13, color: '#444' }}>책 / 범위</div>
-                    <div style={styles.info}>
-                      {book} | {chaptersParam ? `챕터: ${chaptersParam}` : `${Math.min(start, end)}~${Math.max(start, end)}`}
-                    </div>
+                    <div style={styles.info}>{book} | {chapterText}</div>
                   </div>
                   <div />
                   <div>
@@ -388,10 +433,11 @@ export default function OfficialExamPage() {
                     <input
                       style={styles.input}
                       value={numQ}
-                      onChange={(e) => setNumQ(Number(e.target.value || 0))}
+                      onChange={(e) => setNumQ(e.target.value)}
                       type="number"
                       min={1}
                       max={999}
+                      inputMode="numeric"
                     />
                   </div>
                   <div>
@@ -399,10 +445,11 @@ export default function OfficialExamPage() {
                     <input
                       style={styles.input}
                       value={cutMiss}
-                      onChange={(e) => setCutMiss(Number(e.target.value || 0))}
+                      onChange={(e) => setCutMiss(e.target.value)}
                       type="number"
                       min={0}
                       max={999}
+                      inputMode="numeric"
                     />
                   </div>
                 </div>
@@ -430,7 +477,11 @@ export default function OfficialExamPage() {
                     placeholder="뜻을 입력하세요 (예: 달리다)"
                     value={answer}
                     onChange={(e) => setAnswer(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') submitCurrent(answer); }}
+                    onCompositionStart={() => setIsComposing(true)}
+                    onCompositionEnd={(e) => { setIsComposing(false); setAnswer(e.currentTarget.value); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { if (!isComposing) submitCurrent(answer); } }}
+                    autoCapitalize="none"
+                    autoCorrect="off"
                   />
                 </div>
 

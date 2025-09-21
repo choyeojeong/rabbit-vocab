@@ -19,44 +19,53 @@ import TeacherManagePage from './pages/TeacherManagePage.jsx';
 import TeacherReviewList from './pages/TeacherReviewList';
 import TeacherReviewSession from './pages/TeacherReviewSession';
 import TeacherToday from './pages/TeacherToday';
-import TeacherFocusMonitor from './pages/TeacherFocusMonitor.jsx'; // ✅ 이탈 감지 모니터
+import TeacherFocusMonitor from './pages/TeacherFocusMonitor.jsx'; // 이탈 감지 모니터
 
 import { ensureLiveStudent } from './utils/session';
 
 /**
- * ✅ 삭제된 계정/없는 계정의 "유령 로그인"을 막기 위한 보호 라우트
+ * 삭제된 계정/없는 계정의 "유령 로그인"을 막기 위한 보호 라우트
  * - 로컬 세션이 있어도 DB(profiles)에 실제 존재하는지 비동기로 확인
  * - 존재하지 않으면 세션을 비우고 로그인 페이지로 보냄
  */
 function Protected({ children }) {
   const nav = useNavigate();
-  const [status, setStatus] = useState<'checking' | 'ok' | 'redirect'>('checking');
+  const [status, setStatus] = useState('checking'); // 'checking' | 'ok' | 'redirect'
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const s = await ensureLiveStudent(); // 없으면 내부에서 세션도 제거
-      if (!alive) return;
-      if (!s) {
+      try {
+        const s = await ensureLiveStudent(); // 없으면 내부에서 세션 제거
+        if (!alive) return;
+        if (!s) {
+          setStatus('redirect');
+          nav('/', { replace: true });
+        } else {
+          setStatus('ok');
+        }
+      } catch (e) {
+        // 검증 실패 시에도 안전하게 로그인 화면으로 보냄
+        if (!alive) return;
         setStatus('redirect');
         nav('/', { replace: true });
-      } else {
-        setStatus('ok');
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [nav]);
 
-  if (status === 'checking') return null; // 검증 중엔 렌더 안 함(깜빡임 방지)
-  if (status === 'redirect') return null; // 네비게이트 직후
-  return children;
+  if (status === 'checking') return null;   // 검증 중엔 렌더 안 함(깜빡임 방지)
+  if (status === 'redirect') return null;   // 네비게이트 직후
+  return <>{children}</>;
 }
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* 인증 없이 접근 가능한 페이지 */}
+        {/* 공개 라우트 */}
         <Route path="/" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
 
@@ -126,7 +135,7 @@ export default function App() {
           }
         />
         <Route
-          path="/exam/official/result/:id"
+          path="/exam/official/results/:id"
           element={
             <Protected>
               <OfficialResultPage />
@@ -136,13 +145,13 @@ export default function App() {
 
         {/* === 교사용: 모든 하위 라우트는 TeacherShell(비번 게이트)로 보호 === */}
         <Route path="/teacher" element={<TeacherShell />}>
-          {/* /teacher → /teacher/home 리다이렉트는 Shell 내부에서 처리 */}
+          {/* /teacher → /teacher/home 리다이렉트는 Shell 내부에서 처리한다고 가정 */}
           <Route path="home" element={<TeacherHome />} />
           <Route path="manage" element={<TeacherManagePage />} />
           <Route path="review" element={<TeacherReviewList />} />
           <Route path="review/:id" element={<TeacherReviewSession />} />
           <Route path="today" element={<TeacherToday />} />
-          <Route path="focus" element={<TeacherFocusMonitor />} /> {/* ✅ 이탈 감지 */}
+          <Route path="focus" element={<TeacherFocusMonitor />} />
         </Route>
 
         {/* Fallback */}

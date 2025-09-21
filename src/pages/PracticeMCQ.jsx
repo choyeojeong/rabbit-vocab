@@ -7,6 +7,7 @@ import {
   fetchWordsByChapters,
   parseChapterInput,
   buildMCQOptions,
+  ensureArray,
 } from '../utils/vocab';
 import { supabase } from '../utils/supabaseClient';
 import { getSession } from '../utils/session';
@@ -54,11 +55,22 @@ function SpeakerIcon({ size = 18 }) {
 
 export default function PracticeMCQ() {
   const nav = useNavigate();
+  const loc = useLocation();
   const q = useQuery();
-  const book = q.get('book');
-  const start = Number(q.get('start'));
-  const end = Number(q.get('end'));
+
+  // 레거시 쿼리
+  const bookFromQuery = q.get('book') || '';
   const chaptersParam = q.get('chapters'); // "4-8,10,12"
+  const startParam = q.get('start');
+  const endParam = q.get('end');
+
+  // state 우선
+  const book = (loc.state?.book) || bookFromQuery;
+  const chaptersFromState = ensureArray(loc.state?.chapters);   // number[] or []
+  const chaptersFromQuery = parseChapterInput(chaptersParam);    // number[]
+
+  const start = Number(startParam);
+  const end = Number(endParam);
 
   const [phase, setPhase] = useState('play'); // 'play' | 'done'
   const [words, setWords] = useState([]);
@@ -78,37 +90,52 @@ export default function PracticeMCQ() {
   const current = words[i];
   const me = getSession();
 
+  // 사용할 챕터 배열 (우선순위: state > query > [])
+  const chapterList = useMemo(() => {
+    if (chaptersFromState.length) return chaptersFromState;
+    if (chaptersFromQuery.length) return chaptersFromQuery;
+    return [];
+  }, [chaptersFromState, chaptersFromQuery]);
+
   // 데이터 로딩
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        if (!book) return;
-
-        let range = [];
-        if (chaptersParam) {
-          const list = parseChapterInput(chaptersParam);
-          range = await fetchWordsByChapters(book, list);
-        } else if (start && end) {
-          range = await fetchWordsInRange(book, start, end);
+        if (!book) {
+          if (mounted) { setWords([]); setAllPool([]); }
+          return;
         }
 
-        if (!mounted) return;
-        setWords(range);
-        setI(0);
-        setScore(0);
-        setChosen(-1);
-        setWrongs([]);
-        setPhase('play');
+        // 1) 챕터 모드
+        if (chapterList.length > 0) {
+          const range = await fetchWordsByChapters(book, chapterList);
+          if (!mounted) return;
+          setWords(range || []);
+          setI(0); setScore(0); setChosen(-1); setWrongs([]); setPhase('play');
+        }
+        // 2) 범위 모드
+        else if (Number.isFinite(start) && Number.isFinite(end)) {
+          const range = await fetchWordsInRange(book, start, end);
+          if (!mounted) return;
+          setWords(range || []);
+          setI(0); setScore(0); setChosen(-1); setWrongs([]); setPhase('play');
+        }
+        // 3) 아무것도 없으면 빈 배열
+        else {
+          if (mounted) { setWords([]); setAllPool([]); }
+          return;
+        }
 
+        // 보기 풀(책 전체) 로드, 실패 시 range로 폴백
         try {
           const poolAll = await fetchWordsInBook(book);
           if (!mounted) return;
-          setAllPool((poolAll && poolAll.length) ? poolAll : range);
+          setAllPool((poolAll && poolAll.length) ? poolAll : (words.length ? words : []));
         } catch (e) {
           console.warn('MCQ: book pool load failed, fallback to range', e);
           if (!mounted) return;
-          setAllPool(range);
+          setAllPool(words.length ? words : []);
         }
       } catch (e) {
         console.error('MCQ: load failed', e);
@@ -118,7 +145,8 @@ export default function PracticeMCQ() {
       }
     })();
     return () => { mounted = false; };
-  }, [book, start, end, chaptersParam]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [book, chapterList.join(','), start, end]);
 
   // 보기 생성
   useEffect(() => {
@@ -128,7 +156,7 @@ export default function PracticeMCQ() {
     setAnsIdx(answerIndex);
     setChosen(-1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [i, current, allPool]);
+  }, [i, current?.id, allPool.length]);
 
   // 문제 변경 시 자동 발음 (🔊 soundEnabled 일 때만)
   useEffect(() => {
@@ -226,6 +254,15 @@ export default function PracticeMCQ() {
     );
   }
 
+  // 상단 표시 텍스트
+  const chapterText = chapterList.length
+    ? chapterList.join(', ')
+    : (chaptersParam
+        ? chaptersParam
+        : (Number.isFinite(start) && Number.isFinite(end)
+            ? `${Math.min(start, end)}~${Math.max(start, end)}강`
+            : '미지정'));
+
   return (
     <StudentShell>
       <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
@@ -245,7 +282,7 @@ export default function PracticeMCQ() {
           <div className="student-card" style={{ marginTop: 12 }}>
             {/* 진행 정보 */}
             <div style={{ display: 'flex', justifyContent: 'space-between', color:'#444', fontSize:13 }}>
-              <div>{book} | {chaptersParam ? `챕터: ${chaptersParam}` : `${start}~${end}강`}</div>
+              <div>{book} | {chapterText.startsWith('미지정') ? '범위: 미지정' : `챕터/범위: ${chapterText}`}</div>
               <div>{phase === 'play' ? `${i + 1}/${words.length}` : `${words.length}문제 완료`} | 점수 {score}</div>
             </div>
 
