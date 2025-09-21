@@ -28,6 +28,30 @@ function normalizeStatus(v) {
   if (v == null) return "";
   return String(v).trim().toLowerCase();
 }
+function pickRow(r) {
+  // 핸들러에서 필요한 필드만 안전하게 추려서 사용
+  return {
+    id: r.id,
+    student_name: r.student_name ?? "",
+    teacher_name: r.teacher_name ?? null,
+    book: r.book ?? "",
+    chapters_text: r.chapters_text ?? null,
+    chapter_start: r.chapter_start ?? null,
+    chapter_end: r.chapter_end ?? null,
+    num_questions: r.num_questions ?? null,
+    created_at: r.created_at,
+    status: r.status,
+    mode: r.mode,
+  };
+}
+function upsertById(list, row) {
+  const idx = list.findIndex((x) => x.id === row.id);
+  if (idx === -1) return [row, ...list].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  const next = list.slice();
+  next[idx] = { ...next[idx], ...row };
+  next.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  return next;
+}
 
 export default function TeacherReviewList() {
   const [rows, setRows] = useState([]);
@@ -39,8 +63,7 @@ export default function TeacherReviewList() {
   const [hours, setHours] = useState(72);
   const [noTimeLimit, setNoTimeLimit] = useState(false);
 
-  const latestCreatedAtRef = useRef(null);
-  const seenIdsRef = useRef(new Set());
+  const lastNotifiedRef = useRef(new Set()); // 알림 중복 방지
   const notifTimerRef = useRef(null);
 
   const { soundOn, setSoundOn, unlocked, unlock, play } = useDing("teacher_sound", { defaultLength: "long" });
@@ -70,7 +93,7 @@ export default function TeacherReviewList() {
 
       let q = supabase
         .from("test_sessions")
-        .select("id, student_name, book, chapters_text, chapter_start, chapter_end, num_questions, created_at, status, mode")
+        .select("id, student_name, teacher_name, book, chapters_text, chapter_start, chapter_end, num_questions, created_at, status, mode")
         .eq("mode", "official")
         .order("created_at", { ascending: false });
 
@@ -81,11 +104,6 @@ export default function TeacherReviewList() {
 
       const filtered = (data || []).filter((s) => normalizeStatus(s.status) === "submitted");
       setRows(filtered);
-
-      if (filtered.length) {
-        latestCreatedAtRef.current = filtered[0].created_at;
-        seenIdsRef.current = new Set(filtered.map((d) => d.id));
-      }
     } catch (e) {
       console.error("[review list] load error", e);
       setError(e.message || String(e));
@@ -100,41 +118,51 @@ export default function TeacherReviewList() {
     return () => { if (notifTimerRef.current) clearTimeout(notifTimerRef.current); };
   }, [fetchList]);
 
-  // ✅ 실시간 구독: UPDATE(→ submitted 전환) + INSERT(제출 시 바로 넣는 흐름 대비)
+  // ✅ 실시간 구독: UPDATE(→ submitted 전환) + INSERT(바로 submitted인 경우)
   useEffect(() => {
     const ch = supabase.channel("teacher-new-submissions");
 
-    // A) UPDATE: draft → submitted 전환 시 알림/갱신
+    // UPDATE: draft → submitted
     ch.on(
       "postgres_changes",
-      { event: "UPDATE", schema: "public", table: "test_sessions", filter: "mode=eq.official" },
+      { event: "UPDATE", schema: "public", table: "test_sessions" },
       async (payload) => {
-        const s = payload.new || {};
+        const s = pickRow(payload.new || {});
+        if (s.mode !== "official") return;
         if (normalizeStatus(s.status) !== "submitted") return;
-        if (seenIdsRef.current.has(s.id)) return;
-        seenIdsRef.current.add(s.id);
-        await showNotif(s);
-        fetchList();
+
+        // 즉시 업서트 (시간 제한에 걸려도 실시간 건은 보여주기 위해 그대로 넣음)
+        setRows((prev) => upsertById(prev, s));
+
+        // 알림 중복 방지
+        if (!lastNotifiedRef.current.has(s.id)) {
+          lastNotifiedRef.current.add(s.id);
+          await showNotif(s);
+        }
       }
     );
 
-    // B) INSERT: 제출 시점에 INSERT되는 케이스를 대비
+    // INSERT: 혹시 INSERT 자체가 submitted로 들어오는 케이스
     ch.on(
       "postgres_changes",
-      { event: "INSERT", schema: "public", table: "test_sessions", filter: "mode=eq.official" },
+      { event: "INSERT", schema: "public", table: "test_sessions" },
       async (payload) => {
-        const s = payload.new || {};
-        if (normalizeStatus(s.status) !== "submitted") return; // draft 시작은 무시
-        if (seenIdsRef.current.has(s.id)) return;
-        seenIdsRef.current.add(s.id);
-        await showNotif(s);
-        fetchList();
+        const s = pickRow(payload.new || {});
+        if (s.mode !== "official") return;
+        if (normalizeStatus(s.status) !== "submitted") return;
+
+        setRows((prev) => upsertById(prev, s));
+
+        if (!lastNotifiedRef.current.has(s.id)) {
+          lastNotifiedRef.current.add(s.id);
+          await showNotif(s);
+        }
       }
     );
 
     ch.subscribe((status) => setRtStatus(`실시간: ${status}`));
     return () => supabase.removeChannel(ch);
-  }, [fetchList, showNotif]);
+  }, [showNotif]);
 
   return (
     <div style={styles.page}>
