@@ -15,8 +15,8 @@ export const config = { runtime: "nodejs" };
 import Papa from "papaparse";
 
 // ---------- limits (타임아웃 방지 핵심) ----------
-const MAX_INPUT_ROWS = Number(process.env.CSV_PREPARE_MAX_INPUT || 16);  // 요청당 최대 16행
-const OPENAI_SUB_CHUNK = Number(process.env.CSV_PREPARE_CHUNK_SIZE || 8); // OpenAI 보정 소배치
+const MAX_INPUT_ROWS = Number(process.env.CSV_PREPARE_MAX_INPUT || 8);  // 요청당 최대 16행
+const OPENAI_SUB_CHUNK = Number(process.env.CSV_PREPARE_CHUNK_SIZE || 4); // OpenAI 보정 소배치
 const OPENAI_MODEL = (process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
 
 // ---------- types ----------
@@ -99,7 +99,7 @@ async function fetchWithTimeout(
   input: RequestInfo,
   init: RequestInit & { timeoutMs?: number } = {}
 ) {
-  const { timeoutMs = 8500, ...rest } = init; // Vercel 10s 가드 내
+  const { timeoutMs = 7000, ...rest } = init; // Vercel 10s 가드 내
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort("timeout"), timeoutMs);
   try {
@@ -130,7 +130,7 @@ async function callOpenAIWithBackoff(body: any, maxRetries = 2) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-      timeoutMs: 8500, // 호출당 8.5s
+      timeoutMs: 7000, // 호출당 8.5s
     });
 
     if (res.ok) {

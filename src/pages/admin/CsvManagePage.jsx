@@ -109,7 +109,7 @@ export default function CsvManagePage() {
 
   /** 큰 배열을 16행 단위로 순차 호출하여 합치기 */
   async function prepareInBatches(allRows, { book, aiFill, onProgress }) {
-    const MAX_PER_REQ = 16;
+    const MAX_PER_REQ = 8;
     const out = [];
     const total = allRows.length || 0;
     for (let i = 0; i < total; i += MAX_PER_REQ) {
