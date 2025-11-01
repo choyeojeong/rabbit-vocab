@@ -3,9 +3,11 @@ export const config = { runtime: "edge" };
 
 /**
  * Rabbit Vocab CSV Preparer (Edge, TypeScript)
- * - Accepts a CSV file (multipart/form-data, field name: 'file')
+ * - Accepts:
+ *   A) multipart/form-data with 'file'
+ *   B) application/json  { rows: RowLike[], book?: string, aiFill?: boolean }
  * - Normalizes to: book,chapter,term_en,meaning_ko,pos,accepted_ko
- * - Fills missing 'pos' and 'accepted_ko' via OpenAI (when fillMissing=true)
+ * - Fills missing 'pos' and 'accepted_ko' via OpenAI (when fillMissing/aiFill true)
  * - Does NOT deduplicate rows
  * - Returns JSON (default) or text/csv when ?format=csv
  */
@@ -124,7 +126,7 @@ async function callOpenAIWithBackoff(body: any, maxRetries = 5) {
     const res = await fetchWithTimeout(OPENAI_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY ?? ""}`,
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY ?? ""}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
@@ -168,6 +170,98 @@ async function callOpenAIWithBackoff(body: any, maxRetries = 5) {
   }
 }
 
+// ---------- normalization from flexible objects ----------
+/** 헤더 기반/키 추정으로 RowOut[] 생성 */
+function normalizeFromObjects(src: RowIn[], fallbackBook: string): RowOut[] {
+  if (!Array.isArray(src) || src.length === 0) return [];
+  const first = src[0] || {};
+  const headers = Object.keys(first);
+
+  const col_chapter =
+    pickColumn(headers, [
+      "chapter",
+      "챕터",
+      "unit",
+      "lesson",
+      "day",
+      "index",
+      "idx",
+      "번호",
+      "단원",
+      "레슨",
+      "유닛",
+      "강",
+    ]) ?? undefined;
+
+  const col_word =
+    pickColumn(headers, [
+      "word",
+      "term",
+      "영단어",
+      "단어",
+      "english",
+      "en",
+      "term_en",
+    ]) ?? undefined;
+
+  const col_mean =
+    pickColumn(headers, [
+      "mean",
+      "meaning",
+      "뜻",
+      "국문뜻",
+      "ko",
+      "korean",
+      "의미",
+      "meaning_ko",
+    ]) ?? undefined;
+
+  const col_pos = pickColumn(headers, ["pos", "품사", "part of speech"]) ?? undefined;
+
+  const col_acc =
+    pickColumn(headers, [
+      "accepted",
+      "accepted_ko",
+      "synonyms",
+      "동의어",
+      "유의어",
+      "수용표기",
+      "대체표기",
+      "etc",
+    ]) ?? undefined;
+
+  const out = src.map((r, i) => {
+    const term_en = norm(col_word ? r[col_word] : (r as any)["word"]);
+    const [meaning_ko, accRest] = splitMeaning(
+      col_mean ? r[col_mean] : (r as any)["mean"]
+    );
+    const accepted_raw = norm(col_acc ? r[col_acc] : "");
+    const accepted_ko = accepted_raw || accRest || "";
+    const pos = norm(col_pos ? r[col_pos] : "");
+    const chapterRaw = norm(col_chapter ? r[col_chapter] : "");
+    const chapter = toDigits(chapterRaw);
+
+    // book은 src 안에 있으면 우선 사용
+    const bookInRow =
+      norm((r as any)["book"]) ||
+      norm((r as any)["Book"]) ||
+      norm((r as any)["책"]) ||
+      "";
+
+    return {
+      book: bookInRow || fallbackBook,
+      chapter,
+      term_en,
+      meaning_ko,
+      pos,
+      accepted_ko,
+      _row: i + 1,
+    };
+  });
+
+  return out;
+}
+
 // ---------- main handler ----------
 export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -175,7 +269,8 @@ export default async function handler(req: Request): Promise<Response> {
     return new Response(
       JSON.stringify({
         ok: false,
-        error: "Use POST with multipart/form-data (field: file).",
+        error:
+          "Use POST with either multipart/form-data (field: file) or JSON {rows, book, aiFill}.",
       }),
       { headers: jsonHeaders(), status: 405 }
     );
@@ -185,124 +280,97 @@ export default async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const wantCsv = url.searchParams.get("format") === "csv";
     const bookOverride = url.searchParams.get("book") || "";
-    const fillMissing = url.searchParams.get("fillMissing") !== "false";
+    const fillMissingQuery = url.searchParams.get("fillMissing");
     const limit = url.searchParams.get("limit")
       ? parseInt(url.searchParams.get("limit") as string, 10)
       : null;
 
-    const form = await req.formData();
-    const file = form.get("file") as File | null;
-    if (!file) {
-      return new Response(
-        JSON.stringify({ ok: false, error: "No file. Use 'file' field." }),
-        { headers: jsonHeaders(), status: 400 }
-      );
+    // === 입력 디텍트: multipart or JSON ===
+    const contentType = req.headers.get("content-type") || "";
+
+    let bookFromInput = "";
+    let aiFillFromInput: boolean | undefined = undefined;
+    let normalized: RowOut[] = [];
+    let originalCount = 0;
+    let filename = "uploaded.csv";
+
+    if (contentType.includes("multipart/form-data")) {
+      // --------- A) multipart: CSV 파일 업로드 ----------
+      const form = await req.formData();
+      const file = form.get("file") as File | null;
+      if (!file) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "No file. Use 'file' field." }),
+          { headers: jsonHeaders(), status: 400 }
+        );
+      }
+      filename = file.name || "uploaded.csv";
+      const book = norm(bookOverride) || filename.replace(/\.[^.]+$/, "").trim();
+      bookFromInput = book;
+
+      const text = await file.text();
+      const parsed = Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+      }) as any;
+
+      const rows: RowIn[] = Array.isArray(parsed.data) ? parsed.data : [];
+      originalCount = rows.length;
+      if (!originalCount) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "CSV has no rows." }),
+          { headers: jsonHeaders(), status: 400 }
+        );
+      }
+
+      const limited = limit && Number.isFinite(limit) && limit > 0 ? rows.slice(0, limit) : rows;
+      normalized = normalizeFromObjects(limited, bookFromInput);
+    } else {
+      // --------- B) JSON: { rows, book?, aiFill? } ----------
+      let body: any = null;
+      try {
+        body = await req.json();
+      } catch {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error:
+              "Invalid JSON. Send { rows: Row[], book?: string, aiFill?: boolean }",
+          }),
+          { headers: jsonHeaders(), status: 400 }
+        );
+      }
+
+      const rowsIn: RowIn[] = Array.isArray(body?.rows) ? body.rows : [];
+      if (!rowsIn.length) {
+        return new Response(
+          JSON.stringify({ ok: false, error: "rows[] is required." }),
+          { headers: jsonHeaders(), status: 400 }
+        );
+      }
+
+      originalCount = rowsIn.length;
+      aiFillFromInput = typeof body?.aiFill === "boolean" ? body.aiFill : undefined;
+      bookFromInput =
+        norm(body?.book) ||
+        norm(bookOverride) ||
+        "book"; // JSON 모드 기본 book
+
+      const limited =
+        limit && Number.isFinite(limit) && limit > 0 ? rowsIn.slice(0, limit) : rowsIn;
+      normalized = normalizeFromObjects(limited, bookFromInput);
     }
 
-    const filename = file.name || "uploaded.csv";
-    const book = norm(bookOverride) || filename.replace(/\.[^.]+$/, "").trim();
-    const text = await file.text();
-
-    // Papa.parse (제네릭 없이)
-    const parsed = Papa.parse(text, {
-      header: true,
-      skipEmptyLines: true,
-    }) as any;
-
-    let rows: RowIn[] = Array.isArray(parsed.data) ? parsed.data : [];
-    const originalCount = rows.length;
-    if (!originalCount) {
-      return new Response(
-        JSON.stringify({ ok: false, error: "CSV has no rows." }),
-        { headers: jsonHeaders(), status: 400 }
-      );
-    }
-
-    if (limit && Number.isFinite(limit) && limit > 0) {
-      rows = rows.slice(0, limit);
-    }
-
-    const headers: string[] =
-      (parsed.meta?.fields as string[]) || Object.keys(rows[0] || {});
-
-    const col_chapter =
-      pickColumn(headers, [
-        "chapter",
-        "챕터",
-        "unit",
-        "lesson",
-        "day",
-        "index",
-        "idx",
-        "번호",
-        "단원",
-        "레슨",
-        "유닛",
-        "강",
-      ]) ?? undefined;
-
-    const col_word =
-      pickColumn(headers, [
-        "word",
-        "term",
-        "영단어",
-        "단어",
-        "english",
-        "en",
-        "term_en",
-      ]) ?? undefined;
-
-    const col_mean =
-      pickColumn(headers, [
-        "mean",
-        "meaning",
-        "뜻",
-        "국문뜻",
-        "ko",
-        "korean",
-        "의미",
-        "meaning_ko",
-      ]) ?? undefined;
-
-    const col_pos = pickColumn(headers, ["pos", "품사", "part of speech"]) ?? undefined;
-
-    const col_acc =
-      pickColumn(headers, [
-        "accepted",
-        "accepted_ko",
-        "synonyms",
-        "동의어",
-        "유의어",
-        "수용표기",
-        "대체표기",
-        "etc",
-      ]) ?? undefined;
-
-    const normalized: RowOut[] = rows.map((r, i) => {
-      const term_en = norm(col_word ? r[col_word] : (r as any)["word"]);
-      const [meaning_ko, accRest] = splitMeaning(
-        col_mean ? r[col_mean] : (r as any)["mean"]
-      );
-      const accepted_raw = norm(col_acc ? r[col_acc] : "");
-      const accepted_ko = accepted_raw || accRest || "";
-      const pos = norm(col_pos ? r[col_pos] : "");
-      const chapterRaw = norm(col_chapter ? r[col_chapter] : "");
-      const chapter = toDigits(chapterRaw);
-
-      return {
-        book,
-        chapter,
-        term_en,
-        meaning_ko,
-        pos,
-        accepted_ko,
-        _row: i + 1,
-      };
-    });
+    // ====== OpenAI 보정 (pos/accepted_ko) ======
+    const fillMissing =
+      typeof aiFillFromInput === "boolean"
+        ? aiFillFromInput
+        : fillMissingQuery === "false"
+        ? false
+        : true;
 
     let filled: RowOut[] = normalized.slice();
 
-    // ====== OpenAI 보정 (pos/accepted_ko) ======
     if (fillMissing && (process.env.OPENAI_API_KEY || "").trim()) {
       // 보정 필요한 행만 추출
       const needFill = normalized
@@ -310,7 +378,7 @@ export default async function handler(req: Request): Promise<Response> {
         .filter(({ row }) => !row.pos || !row.accepted_ko);
 
       if (needFill.length > 0) {
-        // 청크 크기는 작게 유지(응답 타임아웃/과대 방지)
+        // 환경변수로 조절 가능(기본 30) — JSON 모드에서도 동일
         const chunkSize = Number(process.env.CSV_PREPARE_CHUNK_SIZE || 30);
 
         for (let i = 0; i < needFill.length; i += chunkSize) {
@@ -337,7 +405,6 @@ export default async function handler(req: Request): Promise<Response> {
               JSON.stringify(chunk, null, 2),
             ].join("\n");
 
-          // OpenAI 호출 (백오프/타임아웃 포함)
           const data = await callOpenAIWithBackoff({
             messages: [{ role: "user", content: prompt }],
           });
@@ -351,7 +418,6 @@ export default async function handler(req: Request): Promise<Response> {
           try {
             suggestions = JSON.parse(jsonText) as Suggestion[];
           } catch {
-            // 흔한 경우: 모델이 앞/뒤에 문장을 덧붙인 경우 → JSON만 추출 시도
             const m = jsonText.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
             if (m) {
               try {
@@ -373,7 +439,7 @@ export default async function handler(req: Request): Promise<Response> {
             }
           }
 
-          // 각 청크 사이 약간 쉬어주면 TPM/RPM 안정화
+          // 각 청크 사이 잠깐 쉬기 → TPM/RPM 안정화
           await zzz(150);
         }
       }
@@ -407,11 +473,11 @@ export default async function handler(req: Request): Promise<Response> {
       processed_rows: filled.length,
       filled_pos_count: filled.filter((r) => !!r.pos).length,
       filled_acc_count: filled.filter((r) => !!r.accepted_ko).length,
-      book,
+      book: bookFromInput,
     };
 
     if (wantCsv) {
-      const downloadName = `${book || "normalized"}.csv`.replace(
+      const downloadName = `${bookFromInput || "normalized"}.csv`.replace(
         /[^\w.\-가-힣\(\)\s]/g,
         "_"
       );
