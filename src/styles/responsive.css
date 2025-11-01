@@ -1,0 +1,131 @@
+/* src/styles/responsive.css */
+:root {
+  --bg-student: #fff5f8; /* 연핑크 배경 */
+  --bg-teacher: #f7f9fc;
+  --fg-primary: #ff6fa3;
+  --shadow-soft: 0 10px 30px rgba(0,0,0,0.06);
+}
+
+/* ===== 리셋 & 뷰포트/배경 꽉 채우기 ===== */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-student);
+  color: #222;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;           /* 우측 하단 여백/가로스크롤 방지 */
+}
+
+/* 주소창 높이 변화 대응: 100svh 우선, 폴백으로 100dvh/100vh */
+.vh-100 { min-height: 100svh; }
+@supports not (min-height: 100svh) {
+  .vh-100 { min-height: 100dvh; }
+}
+@supports not (min-height: 100dvh) {
+  .vh-100 { min-height: 100vh; }
+}
+
+/* iOS 하단 홈 인디케이터 여백 */
+.with-safe {
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+/* ===== 공통 페이지 래퍼 ===== */
+.page {
+  width: 100%;
+  min-height: 100dvh;
+}
+
+.student-page { background: var(--bg-student); }
+.teacher-page { background: var(--bg-teacher); }
+
+/* 화면 중앙 정렬 유틸 (세로/가로 모두) */
+.centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 스크롤 있는 페이지에서 카드만 가운데 정렬하고 싶을 때 */
+.centered-top {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* ===== 학생용(모바일 우선) ===== */
+.student-container {
+  width: 100%;
+  max-width: 440px;   /* 살짝 더 컴팩트하게 */
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.student-card {
+  width: 100%;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  padding: 18px;
+}
+
+/* 타이틀/자잘한 요소들 예쁜 기본값 */
+.student-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--fg-primary);
+  margin: 0 0 10px;
+}
+
+.student-sub {
+  font-size: 13px;
+  color: #666;
+  margin: 0 0 14px;
+}
+
+/* 버튼/인풋 기본 스케일 조금 줄이기 */
+.student-input,
+.student-select,
+.student-button {
+  width: 100%;
+  font-size: 15px;
+  padding: 11px 12px;
+  border-radius: 8px;
+  border: 1px solid #eee;
+}
+
+.student-button {
+  background: var(--fg-primary);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(255, 111, 163, 0.25);
+}
+
+.student-button:active { transform: translateY(1px); }
+
+/* 카드 간격 */
+.stack > * + * { margin-top: 12px; }
+
+/* ===== 반응형 보정 ===== */
+@media (min-width: 480px) {
+  .student-card { padding: 20px; }
+  .student-title { font-size: 24px; }
+}
+
+@media (min-width: 768px) {
+  .student-container { max-width: 520px; }
+  .student-card { padding: 24px; }
+}

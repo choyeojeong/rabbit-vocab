@@ -1,0 +1,68 @@
+/* src/index.css */
+
+/* 글로벌 기본값 */
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  /* Rabbit 테마: 연핑크 배경 */
+  color: #222;
+  background-color: #fff5f8;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #ff6fa3;   /* 포인트 컬러 */
+  text-decoration: none;
+}
+a:hover {
+  color: #ff3e8d;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+
+  background: #fff5f8;     /* 전역 배경 */
+  display: flex;
+  flex-direction: column;
+}
+
+h1, h2, h3 {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+button {
+  border-radius: 8px;
+  border: none;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 600;
+  font-family: inherit;
+  background-color: #ff6fa3;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(255, 111, 163, 0.25);
+  transition: background 0.25s, transform 0.1s;
+}
+button:hover {
+  background-color: #ff3e8d;
+}
+button:active {
+  transform: translateY(1px);
+}
+button:focus,
+button:focus-visible {
+  outline: 3px solid #ffd3e3;
+}
+
+/* 다크모드는 사용하지 않음 (테마 고정) */
