@@ -1,5 +1,5 @@
 // /api/csv-prepare.ts
-export const config = { runtime: "nodejs20.x" };
+export const config = { runtime: "nodejs" };
 
 /**
  * Rabbit Vocab CSV Preparer (Serverless / Node.js)
