@@ -1,18 +1,23 @@
 // /api/csv-prepare.ts
-export const config = { runtime: "edge" };
+export const config = { runtime: "nodejs20.x" };
 
 /**
- * Rabbit Vocab CSV Preparer (Edge, TypeScript)
+ * Rabbit Vocab CSV Preparer (Serverless / Node.js)
  * - Accepts:
- *   A) multipart/form-data with 'file'
- *   B) application/json  { rows: RowLike[], book?: string, aiFill?: boolean }
+ *   A) multipart/form-data with 'file'   (※ 요청당 최대 16행만 처리)
+ *   B) application/json { rows: RowLike[], book?: string, aiFill?: boolean }
  * - Normalizes to: book,chapter,term_en,meaning_ko,pos,accepted_ko
  * - Fills missing 'pos' and 'accepted_ko' via OpenAI (when fillMissing/aiFill true)
  * - Does NOT deduplicate rows
- * - Returns JSON (default) or text/csv when ?format=csv
+ * - Returns JSON (default) and includes both `rows` and `csv` for compatibility.
  */
 
 import Papa from "papaparse";
+
+// ---------- limits (타임아웃 방지 핵심) ----------
+const MAX_INPUT_ROWS = Number(process.env.CSV_PREPARE_MAX_INPUT || 16);  // 요청당 최대 16행
+const OPENAI_SUB_CHUNK = Number(process.env.CSV_PREPARE_CHUNK_SIZE || 8); // OpenAI 보정 소배치
+const OPENAI_MODEL = (process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
 
 // ---------- types ----------
 type RowIn = Record<string, unknown>;
@@ -85,8 +90,6 @@ function stripCodeFence(s: string): string {
 
 // ---------- OpenAI helpers (fetch + backoff) ----------
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL = "gpt-4o-mini";
-const DEFAULT_MAX_TOKENS = 300;
 
 /** sleep(ms) */
 const zzz = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -96,7 +99,7 @@ async function fetchWithTimeout(
   input: RequestInfo,
   init: RequestInit & { timeoutMs?: number } = {}
 ) {
-  const { timeoutMs = 30000, ...rest } = init;
+  const { timeoutMs = 8500, ...rest } = init; // Vercel 10s 가드 내
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort("timeout"), timeoutMs);
   try {
@@ -108,14 +111,11 @@ async function fetchWithTimeout(
 }
 
 /** 429/5xx 백오프 + Retry-After 준수 */
-async function callOpenAIWithBackoff(body: any, maxRetries = 5) {
-  const model = (process.env.OPENAI_MODEL || DEFAULT_MODEL).trim();
-  const max_tokens = Number(process.env.OPENAI_MAX_TOKENS || DEFAULT_MAX_TOKENS);
-
+async function callOpenAIWithBackoff(body: any, maxRetries = 2) {
   const payload = {
-    model,
-    temperature: 0.2,
-    max_tokens,
+    model: OPENAI_MODEL,
+    temperature: 0,
+    response_format: { type: "json_object" }, // JSON 강제
     ...body,
   };
 
@@ -130,12 +130,10 @@ async function callOpenAIWithBackoff(body: any, maxRetries = 5) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-      timeoutMs: 45000, // 개별 호출 45초 제한
+      timeoutMs: 8500, // 호출당 8.5s
     });
 
-    // 정상 응답
     if (res.ok) {
-      // OpenAI는 JSON을 줘야 하지만 방어적으로 처리
       try {
         const data = await res.json();
         return data;
@@ -145,108 +143,55 @@ async function callOpenAIWithBackoff(body: any, maxRetries = 5) {
       }
     }
 
-    // 재시도 가능한 코드
     if ((res.status === 429 || res.status >= 500) && attempt <= maxRetries) {
-      // Retry-After 또는 x-ratelimit-reset 기반 대기
       const ra = res.headers.get("retry-after");
       const reset = res.headers.get("x-ratelimit-reset-tokens");
-      const waitSec = ra
-        ? Number(ra)
-        : reset
-        ? Number(reset)
-        : Math.min(60, 2 ** attempt);
-      await zzz(Math.max(1, waitSec) * 1000);
+      const waitSec = ra ? Number(ra) : reset ? Number(reset) : Math.min(8, 2 ** attempt);
+      await zzz(Math.max(0.4, waitSec) * 1000);
       continue;
     }
 
-    // 그 외 에러는 본문을 읽어서 throw
     let bodyText = "";
     try {
       bodyText = await res.text();
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
     throw new Error(`OpenAI error ${res.status}: ${bodyText.slice(0, 500)}`);
   }
 }
 
 // ---------- normalization from flexible objects ----------
-/** 헤더 기반/키 추정으로 RowOut[] 생성 */
 function normalizeFromObjects(src: RowIn[], fallbackBook: string): RowOut[] {
   if (!Array.isArray(src) || src.length === 0) return [];
   const first = src[0] || {};
   const headers = Object.keys(first);
 
   const col_chapter =
-    pickColumn(headers, [
-      "chapter",
-      "챕터",
-      "unit",
-      "lesson",
-      "day",
-      "index",
-      "idx",
-      "번호",
-      "단원",
-      "레슨",
-      "유닛",
-      "강",
-    ]) ?? undefined;
+    pickColumn(headers, ["chapter","챕터","unit","lesson","day","index","idx","번호","단원","레슨","유닛","강"]) ?? undefined;
 
   const col_word =
-    pickColumn(headers, [
-      "word",
-      "term",
-      "영단어",
-      "단어",
-      "english",
-      "en",
-      "term_en",
-    ]) ?? undefined;
+    pickColumn(headers, ["word","term","영단어","단어","english","en","term_en"]) ?? undefined;
 
   const col_mean =
-    pickColumn(headers, [
-      "mean",
-      "meaning",
-      "뜻",
-      "국문뜻",
-      "ko",
-      "korean",
-      "의미",
-      "meaning_ko",
-    ]) ?? undefined;
+    pickColumn(headers, ["mean","meaning","뜻","국문뜻","ko","korean","의미","meaning_ko"]) ?? undefined;
 
-  const col_pos = pickColumn(headers, ["pos", "품사", "part of speech"]) ?? undefined;
+  const col_pos = pickColumn(headers, ["pos","품사","part of speech"]) ?? undefined;
 
   const col_acc =
-    pickColumn(headers, [
-      "accepted",
-      "accepted_ko",
-      "synonyms",
-      "동의어",
-      "유의어",
-      "수용표기",
-      "대체표기",
-      "etc",
-    ]) ?? undefined;
+    pickColumn(headers, ["accepted","accepted_ko","synonyms","동의어","유의어","수용표기","대체표기","etc"]) ?? undefined;
 
   const out = src.map((r, i) => {
     const term_en = norm(col_word ? r[col_word] : (r as any)["word"]);
-    const [meaning_ko, accRest] = splitMeaning(
-      col_mean ? r[col_mean] : (r as any)["mean"]
-    );
+    const [meaning_ko, accRest] = splitMeaning(col_mean ? r[col_mean] : (r as any)["mean"]);
     const accepted_raw = norm(col_acc ? r[col_acc] : "");
     const accepted_ko = accepted_raw || accRest || "";
     const pos = norm(col_pos ? r[col_pos] : "");
     const chapterRaw = norm(col_chapter ? r[col_chapter] : "");
     const chapter = toDigits(chapterRaw);
 
-    // book은 src 안에 있으면 우선 사용
     const bookInRow =
       norm((r as any)["book"]) ||
       norm((r as any)["Book"]) ||
-      norm((r as any)["책"]) ||
-      "";
+      norm((r as any)["책"]) || "";
 
     return {
       book: bookInRow || fallbackBook,
@@ -267,25 +212,24 @@ export default async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") {
     return new Response(
-      JSON.stringify({
-        ok: false,
-        error:
-          "Use POST with either multipart/form-data (field: file) or JSON {rows, book, aiFill}.",
-      }),
+      JSON.stringify({ ok: false, error: "Use POST (multipart 'file' or JSON {rows, book, aiFill})." }),
       { headers: jsonHeaders(), status: 405 }
     );
   }
 
   try {
+    if (!process.env.OPENAI_API_KEY) {
+      // 키가 없어도 normalize만 하게 허용할지 선택. 여기선 허용(보정 스킵).
+      // return new Response(JSON.stringify({ ok:false, error:"OPENAI_API_KEY missing" }), { headers: jsonHeaders(), status: 500 });
+    }
+
     const url = new URL(req.url);
     const wantCsv = url.searchParams.get("format") === "csv";
     const bookOverride = url.searchParams.get("book") || "";
     const fillMissingQuery = url.searchParams.get("fillMissing");
-    const limit = url.searchParams.get("limit")
-      ? parseInt(url.searchParams.get("limit") as string, 10)
-      : null;
+    const limitParam = url.searchParams.get("limit");
+    const limit = limitParam ? parseInt(limitParam, 10) : null;
 
-    // === 입력 디텍트: multipart or JSON ===
     const contentType = req.headers.get("content-type") || "";
 
     let bookFromInput = "";
@@ -293,6 +237,7 @@ export default async function handler(req: Request): Promise<Response> {
     let normalized: RowOut[] = [];
     let originalCount = 0;
     let filename = "uploaded.csv";
+    let partial = false;
 
     if (contentType.includes("multipart/form-data")) {
       // --------- A) multipart: CSV 파일 업로드 ----------
@@ -309,10 +254,7 @@ export default async function handler(req: Request): Promise<Response> {
       bookFromInput = book;
 
       const text = await file.text();
-      const parsed = Papa.parse(text, {
-        header: true,
-        skipEmptyLines: true,
-      }) as any;
+      const parsed = Papa.parse(text, { header: true, skipEmptyLines: true }) as any;
 
       const rows: RowIn[] = Array.isArray(parsed.data) ? parsed.data : [];
       originalCount = rows.length;
@@ -323,7 +265,13 @@ export default async function handler(req: Request): Promise<Response> {
         );
       }
 
-      const limited = limit && Number.isFinite(limit) && limit > 0 ? rows.slice(0, limit) : rows;
+      let usable = rows;
+      // 요청당 최대 처리 행수 제한
+      if (usable.length > MAX_INPUT_ROWS) {
+        usable = usable.slice(0, MAX_INPUT_ROWS);
+        partial = true;
+      }
+      const limited = limit && Number.isFinite(limit) && limit > 0 ? usable.slice(0, limit) : usable;
       normalized = normalizeFromObjects(limited, bookFromInput);
     } else {
       // --------- B) JSON: { rows, book?, aiFill? } ----------
@@ -332,11 +280,7 @@ export default async function handler(req: Request): Promise<Response> {
         body = await req.json();
       } catch {
         return new Response(
-          JSON.stringify({
-            ok: false,
-            error:
-              "Invalid JSON. Send { rows: Row[], book?: string, aiFill?: boolean }",
-          }),
+          JSON.stringify({ ok: false, error: "Invalid JSON. Send { rows: Row[], book?: string, aiFill?: boolean }" }),
           { headers: jsonHeaders(), status: 400 }
         );
       }
@@ -351,13 +295,15 @@ export default async function handler(req: Request): Promise<Response> {
 
       originalCount = rowsIn.length;
       aiFillFromInput = typeof body?.aiFill === "boolean" ? body.aiFill : undefined;
-      bookFromInput =
-        norm(body?.book) ||
-        norm(bookOverride) ||
-        "book"; // JSON 모드 기본 book
+      bookFromInput = norm(body?.book) || norm(bookOverride) || "book";
 
+      let usable = rowsIn;
+      if (usable.length > MAX_INPUT_ROWS) {
+        usable = usable.slice(0, MAX_INPUT_ROWS);
+        partial = true;
+      }
       const limited =
-        limit && Number.isFinite(limit) && limit > 0 ? rowsIn.slice(0, limit) : rowsIn;
+        limit && Number.isFinite(limit) && limit > 0 ? usable.slice(0, limit) : usable;
       normalized = normalizeFromObjects(limited, bookFromInput);
     }
 
@@ -372,17 +318,13 @@ export default async function handler(req: Request): Promise<Response> {
     let filled: RowOut[] = normalized.slice();
 
     if (fillMissing && (process.env.OPENAI_API_KEY || "").trim()) {
-      // 보정 필요한 행만 추출
       const needFill = normalized
         .map((row, idx) => ({ row, idx }))
         .filter(({ row }) => !row.pos || !row.accepted_ko);
 
       if (needFill.length > 0) {
-        // 환경변수로 조절 가능(기본 30) — JSON 모드에서도 동일
-        const chunkSize = Number(process.env.CSV_PREPARE_CHUNK_SIZE || 30);
-
-        for (let i = 0; i < needFill.length; i += chunkSize) {
-          const chunk = needFill.slice(i, i + chunkSize).map(({ row, idx }) => ({
+        for (let i = 0; i < needFill.length; i += OPENAI_SUB_CHUNK) {
+          const chunk = needFill.slice(i, i + OPENAI_SUB_CHUNK).map(({ row, idx }) => ({
             idx,
             term_en: row.term_en,
             meaning_ko: row.meaning_ko,
@@ -390,47 +332,26 @@ export default async function handler(req: Request): Promise<Response> {
             accepted_ko: row.accepted_ko,
           }));
 
-          const prompt =
-            [
-              "당신은 영어 단어 데이터의 보정기입니다.",
-              "각 항목에 대해 누락된 pos(품사)와 accepted_ko(동의어/대체표기, 한국어)를 채워주세요.",
-              "규칙:",
-              "- 이미 값이 있으면 그대로 유지 (덮어쓰지 말 것)",
-              "- pos는 간결한 표기: n., v., adj., adv., prep., pron., conj., interj. 등",
-              "- accepted_ko는 쉼표로 구분된 한국어 표현",
-              "- meaning_ko(첫뜻)는 변경하지 말 것",
-              "- 응답은 JSON 배열만, 각 항목: { idx, pos?, accepted_ko? }",
-              "",
-              "입력:",
-              JSON.stringify(chunk, null, 2),
-            ].join("\n");
-
+          const sys =
+            'You transform vocabulary rows to fill missing "pos" (e.g., n., v., adj., adv., prep., pron., conj., interj.) and "accepted_ko" (comma-separated Korean synonyms). Keep existing values. Output STRICT JSON with array "rows": [{idx, pos?, accepted_ko?}].';
           const data = await callOpenAIWithBackoff({
-            messages: [{ role: "user", content: prompt }],
+            messages: [
+              { role: "system", content: sys },
+              { role: "user", content: JSON.stringify({ rows: chunk }) },
+            ],
           });
 
-          // 방어적 파싱
-          const content: string =
-            data?.choices?.[0]?.message?.content?.trim() || "[]";
+          const content: string = data?.choices?.[0]?.message?.content?.trim() || "{}";
           const jsonText = stripCodeFence(content);
-
-          let suggestions: Suggestion[] = [];
+          let suggestions: { rows?: Suggestion[] } = {};
           try {
-            suggestions = JSON.parse(jsonText) as Suggestion[];
+            suggestions = JSON.parse(jsonText);
           } catch {
-            const m = jsonText.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
-            if (m) {
-              try {
-                suggestions = JSON.parse(m[0]) as Suggestion[];
-              } catch {
-                suggestions = [];
-              }
-            } else {
-              suggestions = [];
-            }
+            suggestions = {};
           }
+          const arr = Array.isArray(suggestions?.rows) ? suggestions.rows! : [];
 
-          for (const s of suggestions) {
+          for (const s of arr) {
             const idx = Number(s.idx);
             if (Number.isInteger(idx) && filled[idx]) {
               if (!filled[idx].pos && s.pos) filled[idx].pos = norm(s.pos);
@@ -439,22 +360,14 @@ export default async function handler(req: Request): Promise<Response> {
             }
           }
 
-          // 각 청크 사이 잠깐 쉬기 → TPM/RPM 안정화
+          // 소배치 사이 잠깐 대기 (레이트 리밋/타임아웃 방지)
           await zzz(150);
         }
       }
     }
 
-    const outHeaders = [
-      "book",
-      "chapter",
-      "term_en",
-      "meaning_ko",
-      "pos",
-      "accepted_ko",
-    ] as const;
+    const outHeaders = ["book","chapter","term_en","meaning_ko","pos","accepted_ko"] as const;
 
-    // CSV 생성
     const csv = Papa.unparse(
       filled.map((r) => ({
         book: r.book,
@@ -474,35 +387,26 @@ export default async function handler(req: Request): Promise<Response> {
       filled_pos_count: filled.filter((r) => !!r.pos).length,
       filled_acc_count: filled.filter((r) => !!r.accepted_ko).length,
       book: bookFromInput,
+      partial, // true면: 더 쪼개서 다시 호출 필요
+      max_per_request: MAX_INPUT_ROWS,
+      sub_chunk: OPENAI_SUB_CHUNK,
     };
 
     if (wantCsv) {
       const downloadName = `${bookFromInput || "normalized"}.csv`.replace(
-        /[^\w.\-가-힣\(\)\s]/g,
-        "_"
+        /[^\w.\-가-힣\(\)\s]/g, "_"
       );
       return new Response(csv, { headers: csvHeaders(downloadName) });
     }
 
+    // JSON 응답: rows + csv + stats 동시 제공 (클라이언트 호환)
     return new Response(
-      JSON.stringify(
-        {
-          ...stats,
-          csv,
-          sample: filled.slice(0, 10),
-          columns: outHeaders,
-        },
-        null,
-        2
-      ),
+      JSON.stringify({ ...stats, rows: filled, csv, columns: outHeaders }, null, 2),
       { headers: jsonHeaders() }
     );
   } catch (err: unknown) {
     return new Response(
-      JSON.stringify({
-        ok: false,
-        error: (err as Error)?.message || String(err),
-      }),
+      JSON.stringify({ ok: false, error: (err as Error)?.message || String(err) }),
       { headers: jsonHeaders(), status: 500 }
     );
   }

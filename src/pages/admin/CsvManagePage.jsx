@@ -2,17 +2,17 @@
 import { useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { supabase } from "../../utils/supabaseClient";
-import { aiPrepareInBatches } from "../../utils/batchAiPrepare";
 
 /**
  * CSV Manage Page
- * - 파일 업로드 → (클라이언트에서 CSV 파싱) → /api/csv-prepare를 배치 호출(AI 보정)
+ * - 파일 업로드 → (클라이언트에서 CSV 파싱) → /api/csv-prepare를 16줄 단위로 순차 호출(AI 보정)
  * - 결과 미리보기 + CSV 다운로드
  * - Supabase 등록(word_batches 로그 + vocab_words 행 INSERT)
  *
  * 주의:
  * - 중복 제거하지 않습니다(요청사항 반영). INSERT만 사용.
  * - 테이블: word_batches(로그), vocab_words(실제 단어 데이터)
+ * - 서버 함수는 요청당 최대 16행만 처리하도록 설정되어 있으므로 클라이언트에서 배치로 쪼개 순차 호출합니다.
  */
 export default function CsvManagePage() {
   const fileRef = useRef(null);
@@ -79,6 +79,61 @@ export default function CsvManagePage() {
     return out;
   }
 
+  /** 단일 소배치(최대 16행)를 /api/csv-prepare에 POST (재시도/백오프 포함) */
+  async function postSmallBatch(rowsChunk, { book, aiFill }, attempt = 0) {
+    const resp = await fetch("/api/csv-prepare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rows: rowsChunk, // 서버는 JSON { rows, book?, aiFill? } 지원
+        book,
+        aiFill,
+      }),
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      // 429/500/504 등은 몇 차례 재시도
+      if ((resp.status === 429 || resp.status === 500 || resp.status === 504) && attempt < 3) {
+        const wait = 400 * Math.pow(2, attempt); // 0.4s → 0.8s → 1.6s
+        await new Promise((r) => setTimeout(r, wait));
+        return postSmallBatch(rowsChunk, { book, aiFill }, attempt + 1);
+      }
+      throw new Error(`csv-prepare failed: ${resp.status} ${txt}`);
+    }
+
+    const data = await resp.json();
+    // 서버는 rows + csv + stats 등을 함께 반환. 여기서는 rows만 수집.
+    return Array.isArray(data?.rows) ? data.rows : [];
+  }
+
+  /** 큰 배열을 16행 단위로 순차 호출하여 합치기 */
+  async function prepareInBatches(allRows, { book, aiFill, onProgress }) {
+    const MAX_PER_REQ = 16;
+    const out = [];
+    const total = allRows.length || 0;
+    for (let i = 0; i < total; i += MAX_PER_REQ) {
+      const chunk = allRows.slice(i, i + MAX_PER_REQ);
+
+      try {
+        const rows = await postSmallBatch(chunk, { book, aiFill });
+        out.push(...rows);
+      } catch (e) {
+        // 혹시 이 소배치가 계속 실패한다면 반으로 더 잘게 쪼개 복구
+        const half = Math.max(1, Math.floor(chunk.length / 2));
+        for (let j = 0; j < chunk.length; j += half) {
+          const sub = chunk.slice(j, j + half);
+          const rows = await postSmallBatch(sub, { book, aiFill });
+          out.push(...rows);
+        }
+      }
+
+      if (onProgress) onProgress(Math.min(1, (i + chunk.length) / total));
+    }
+    if (onProgress) onProgress(1);
+    return out;
+  }
+
   /** CSV → 표준행 → (선택)AI 보정(배치) → rows/state 갱신 */
   async function handleUpload() {
     setErrorMsg("");
@@ -96,16 +151,15 @@ export default function CsvManagePage() {
         return;
       }
 
-      const fallbackBook = bookOverride.trim() || file.name.replace(/\.[^.]+$/, "");
+      const fallbackBook = (bookOverride || file.name.replace(/\.[^.]+$/, "")).trim();
       const parsedRows = await parseCsvFileToRows(file, fallbackBook);
 
       let filledRows = parsedRows;
       if (fillMissing) {
-        // 큰 파일도 안정적으로 변환: 배치 처리 + 진행률 + 재시도
-        filledRows = await aiPrepareInBatches(parsedRows, {
-          batchSize: 250, // 200~300 권장
-          aiFill: true,
+        // 큰 파일도 안정적으로 변환: 16행 단위 순차 처리 + 진행률 + 재시도
+        filledRows = await prepareInBatches(parsedRows, {
           book: fallbackBook,
+          aiFill: true,
           onProgress: (p) => setProgress(p),
         });
       }
