@@ -5,14 +5,18 @@ import { supabase } from "../../utils/supabaseClient";
 
 /**
  * CSV Manage Page
- * - 파일 업로드 → (클라이언트에서 CSV 파싱) → /api/csv-prepare를 16줄 단위로 순차 호출(AI 보정)
+ * - 파일 업로드 → (클라이언트에서 CSV 파싱) → /api/csv-prepare를 "아주 작은" 배치(3줄)로 순차 호출(AI 보정)
  * - 결과 미리보기 + CSV 다운로드
  * - Supabase 등록(word_batches 로그 + vocab_words 행 INSERT)
+ *
+ * 핵심 변경점(타임아웃 이슈용):
+ * 1. 프론트에서 한 번에 3줄만 /api/csv-prepare로 보냅니다 → 서버가 200을 빨리 줘서 진행률이 0%에 안멈춤
+ * 2. 각 요청에 12초 타임아웃(AbortController) → 뻗으면 그 배치는 원본 그대로 사용
+ * 3. 배치가 끝날 때마다 onProgress 호출 → 진행률이 바로바로 올라감
  *
  * 주의:
  * - 중복 제거하지 않습니다(요청사항 반영). INSERT만 사용.
  * - 테이블: word_batches(로그), vocab_words(실제 단어 데이터)
- * - 서버 함수는 요청당 최대 16행만 처리하도록 설정되어 있으므로 클라이언트에서 배치로 쪼개 순차 호출합니다.
  */
 export default function CsvManagePage() {
   const fileRef = useRef(null);
@@ -23,10 +27,10 @@ export default function CsvManagePage() {
 
   // 상태
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0); // 배치 진행률(0~1)
-  const [resultCsv, setResultCsv] = useState(""); // 변환 결과 CSV 원문(다운로드용)
-  const [stats, setStats] = useState(null); // 통계
-  const [rows, setRows] = useState([]); // 미리보기/등록용 행 배열
+  const [progress, setProgress] = useState(0); // 0~1
+  const [resultCsv, setResultCsv] = useState("");
+  const [stats, setStats] = useState(null);
+  const [rows, setRows] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
 
   const previewRows = useMemo(() => rows.slice(0, 50), [rows]);
@@ -34,14 +38,11 @@ export default function CsvManagePage() {
   /** CSV 파일을 표준 행 구조로 파싱 */
   async function parseCsvFileToRows(file, bookFallback) {
     const text = await file.text();
-    // header 유무 상관없이 최대한 흡수
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-
     const headerMode = Array.isArray(parsed.data) && parsed.meta?.fields?.length > 0;
     let out = [];
 
     if (headerMode) {
-      // 헤더가 있는 경우: 필드명 추정
       out = parsed.data
         .filter((r) => r && Object.values(r).some((v) => String(v ?? "").trim() !== ""))
         .map((r) => ({
@@ -53,14 +54,14 @@ export default function CsvManagePage() {
           accepted_ko: (r.accepted_ko ?? r.synonyms_ko ?? r.syn_ko ?? "").toString().trim(),
         }));
     } else {
-      // 헤더가 없는 경우: 단순 쉼표 분해(최대 6칸)
+      // 헤더 없는 경우
       const lines = text
         .split(/\r?\n/)
         .map((l) => l.trim())
         .filter(Boolean);
 
       out = lines.map((line) => {
-        const p = line.split(","); // 아주 단순 분해
+        const p = line.split(",");
         return {
           book: (p[0] ?? bookFallback ?? "").toString().trim(),
           chapter: (p[1] ?? "").toString().trim(),
@@ -71,70 +72,85 @@ export default function CsvManagePage() {
         };
       });
     }
+
     // 빈 행 제거
     out = out.filter(
       (r) =>
         r.term_en !== "" || r.meaning_ko !== "" || r.pos !== "" || r.accepted_ko !== ""
     );
+
     return out;
   }
 
-  /** 단일 소배치(최대 16행)를 /api/csv-prepare에 POST (재시도/백오프 포함) */
-  async function postSmallBatch(rowsChunk, { book, aiFill }, attempt = 0) {
-    const resp = await fetch("/api/csv-prepare", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        rows: rowsChunk, // 서버는 JSON { rows, book?, aiFill? } 지원
-        book,
-        aiFill,
-      }),
-    });
+  /**
+   * 아주 작은 소배치(기본 3줄)를 /api/csv-prepare로 보내서 AI 보정
+   * - 12초 타임아웃
+   * - 실패하면 원본 rowsChunk 그대로 반환
+   */
+  async function postSmallBatch(rowsChunk, { book, aiFill }) {
+    // 12초 타임아웃
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
 
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => "");
-      // 429/500/504 등은 몇 차례 재시도
-      if ((resp.status === 429 || resp.status === 500 || resp.status === 504) && attempt < 3) {
-        const wait = 400 * Math.pow(2, attempt); // 0.4s → 0.8s → 1.6s
-        await new Promise((r) => setTimeout(r, wait));
-        return postSmallBatch(rowsChunk, { book, aiFill }, attempt + 1);
+    try {
+      const resp = await fetch("/api/csv-prepare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: rowsChunk,
+          book,
+          aiFill,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!resp.ok) {
+        // 서버가 에러면 원본을 돌려보냄
+        return rowsChunk;
       }
-      throw new Error(`csv-prepare failed: ${resp.status} ${txt}`);
-    }
 
-    const data = await resp.json();
-    // 서버는 rows + csv + stats 등을 함께 반환. 여기서는 rows만 수집.
-    return Array.isArray(data?.rows) ? data.rows : [];
+      const data = await resp.json().catch(() => ({}));
+      if (Array.isArray(data?.rows) && data.rows.length) {
+        return data.rows;
+      }
+
+      return rowsChunk;
+    } catch (e) {
+      // fetch 에러/타임아웃이면 원본 반환
+      clearTimeout(timer);
+      return rowsChunk;
+    }
   }
 
-  /** 큰 배열을 16행 단위로 순차 호출하여 합치기 */
-  async function prepareInBatches(allRows, { book, aiFill, onProgress }) {
-    const MAX_PER_REQ = 8;
+  /**
+   * 큰 배열을 3줄 단위로 순차 호출
+   * - 호출마다 onProgress 호출 → 진행률 바로 반영
+   * - 서버가 느려도 3줄만 기다리면 되므로 0%에 안멈춤
+   */
+  async function prepareInTinyBatches(allRows, { book, aiFill, onProgress }) {
+    const MAX_PER_REQ = 3; // 진짜 작게
     const out = [];
     const total = allRows.length || 0;
+    let done = 0;
+
     for (let i = 0; i < total; i += MAX_PER_REQ) {
       const chunk = allRows.slice(i, i + MAX_PER_REQ);
+      const converted = await postSmallBatch(chunk, { book, aiFill });
+      out.push(...converted);
+      done += chunk.length;
 
-      try {
-        const rows = await postSmallBatch(chunk, { book, aiFill });
-        out.push(...rows);
-      } catch (e) {
-        // 혹시 이 소배치가 계속 실패한다면 반으로 더 잘게 쪼개 복구
-        const half = Math.max(1, Math.floor(chunk.length / 2));
-        for (let j = 0; j < chunk.length; j += half) {
-          const sub = chunk.slice(j, j + half);
-          const rows = await postSmallBatch(sub, { book, aiFill });
-          out.push(...rows);
-        }
+      if (onProgress) {
+        onProgress(done, total);
       }
-
-      if (onProgress) onProgress(Math.min(1, (i + chunk.length) / total));
     }
-    if (onProgress) onProgress(1);
+
+    if (onProgress) onProgress(total, total);
     return out;
   }
 
-  /** CSV → 표준행 → (선택)AI 보정(배치) → rows/state 갱신 */
+  /** CSV → 표준행 → (선택)AI 보정(아주 작은 배치) → rows/state 갱신 */
   async function handleUpload() {
     setErrorMsg("");
     setStats(null);
@@ -155,16 +171,20 @@ export default function CsvManagePage() {
       const parsedRows = await parseCsvFileToRows(file, fallbackBook);
 
       let filledRows = parsedRows;
+
       if (fillMissing) {
-        // 큰 파일도 안정적으로 변환: 16행 단위 순차 처리 + 진행률 + 재시도
-        filledRows = await prepareInBatches(parsedRows, {
+        // 아주 작은 배치로 순차 호출
+        filledRows = await prepareInTinyBatches(parsedRows, {
           book: fallbackBook,
           aiFill: true,
-          onProgress: (p) => setProgress(p),
+          onProgress: (done, total) => {
+            const pct = total > 0 ? done / total : 1;
+            setProgress(pct);
+          },
         });
       }
 
-      // 결과 CSV 생성(화면 미리보기/다운로드 공용)
+      // 결과 CSV 생성
       const csv = Papa.unparse(filledRows, {
         columns: ["book", "chapter", "term_en", "meaning_ko", "pos", "accepted_ko"],
       });
@@ -172,10 +192,12 @@ export default function CsvManagePage() {
       setRows(filledRows);
       setResultCsv(csv);
 
-      // 통계 계산(간단 버전)
+      // 간단 통계
       const total = filledRows.length;
       const withPos = filledRows.filter((r) => String(r.pos ?? "").trim() !== "").length;
-      const withAcc = filledRows.filter((r) => String(r.accepted_ko ?? "").trim() !== "").length;
+      const withAcc = filledRows.filter(
+        (r) => String(r.accepted_ko ?? "").trim() !== ""
+      ).length;
 
       setStats({
         book: fallbackBook,
@@ -212,7 +234,7 @@ export default function CsvManagePage() {
 
     setBusy(true);
     try {
-      // 1) word_batches 로그 생성
+      // 1) word_batches 로그
       const batchName = `${stats?.book || "batch"} - ${new Date()
         .toISOString()
         .slice(0, 19)
@@ -223,29 +245,25 @@ export default function CsvManagePage() {
         .insert({
           name: batchName,
           book: stats?.book || null,
-          source_filename:
-            fileRef.current?.files?.[0]?.name || "(unknown filename)",
+          source_filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
           rows_count: rows.length,
         })
         .select()
         .single();
 
-      if (e1) {
-        throw new Error(`[word_batches.insert] ${e1.message}`);
-      }
+      if (e1) throw new Error(`[word_batches.insert] ${e1.message}`);
 
-      // 2) vocab_words INSERT (중복 제거 X, INSERT만)
+      // 2) vocab_words INSERT
       const CHUNK = 500;
       for (let i = 0; i < rows.length; i += CHUNK) {
         const chunk = rows.slice(i, i + CHUNK).map((r) => ({
           book: (r.book ?? "").toString().trim(),
-          chapter: (r.chapter ?? "").toString().trim(), // DB가 int면 서버에서 형변환
+          chapter: (r.chapter ?? "").toString().trim(),
           term_en: (r.term_en ?? "").toString().trim(),
           meaning_ko: (r.meaning_ko ?? "").toString().trim(),
           pos: (r.pos ?? "").toString().trim(),
           accepted_ko: (r.accepted_ko ?? "").toString().trim(),
-          // batch_id 컬럼이 있다면:
-          // batch_id: batch?.id ?? null,
+          // batch_id: batch?.id ?? null, // 스키마에 있으면 살리기
         }));
 
         const { error: e2 } = await supabase.from("vocab_words").insert(chunk);
@@ -295,14 +313,14 @@ export default function CsvManagePage() {
                   checked={fillMissing}
                   onChange={(e) => setFillMissing(e.target.checked)}
                 />
-                <span style={{ marginLeft: 8 }}>
-                  비어 있는 pos/accepted_ko 채우기
-                </span>
+                <span style={{ marginLeft: 8 }}>비어 있는 pos/accepted_ko 채우기</span>
               </label>
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+          <div
+            style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}
+          >
             <button onClick={handleUpload} disabled={busy} style={styles.btn}>
               {busy ? "처리 중..." : "AI 변환 실행"}
             </button>
@@ -323,7 +341,6 @@ export default function CsvManagePage() {
               Supabase 등록
             </button>
 
-            {/* 진행률 바 */}
             {busy && (
               <div style={{ flex: 1, minWidth: 160 }}>
                 <div style={{ height: 8, background: "#eee", borderRadius: 6 }}>
@@ -357,14 +374,12 @@ export default function CsvManagePage() {
               <div>처리 행 수: {stats.processed_rows?.toLocaleString?.()}</div>
               <div>pos 채워진 행: {stats.filled_pos_count?.toLocaleString?.()}</div>
               <div>
-                accepted_ko 채워진 행:{" "}
-                {stats.filled_acc_count?.toLocaleString?.()}
+                accepted_ko 채워진 행: {stats.filled_acc_count?.toLocaleString?.()}
               </div>
             </div>
           )}
         </div>
 
-        {/* 미리보기 */}
         {rows.length > 0 && (
           <div style={styles.card}>
             <div style={styles.subhead}>
