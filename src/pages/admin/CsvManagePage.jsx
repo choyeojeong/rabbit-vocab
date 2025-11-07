@@ -232,8 +232,7 @@ export default function CsvManagePage() {
       for (let i = 0; i < rows.length; i += CHUNK) {
         const chunk = rows.slice(i, i + CHUNK).map((r) => ({
           book: (r.book ?? "").toString().trim(),
-          chapter: (r.chapter ?? "").toString().trim(),
-          term_en: (r.term_en ?? "").toString().trim(),
+chapter: Number(r.chapter) || null,          term_en: (r.term_en ?? "").toString().trim(),
           meaning_ko: (r.meaning_ko ?? "").toString().trim(),
           pos: (r.pos ?? "").toString().trim(),
           accepted_ko: (r.accepted_ko ?? "").toString().trim(),
