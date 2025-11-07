@@ -9,14 +9,8 @@ import { supabase } from "../../utils/supabaseClient";
  * - 결과 미리보기 + CSV 다운로드
  * - Supabase 등록(word_batches 로그 + vocab_words 행 INSERT)
  *
- * 핵심 변경점(타임아웃 이슈용):
- * 1. 프론트에서 한 번에 3줄만 /api/csv-prepare로 보냅니다 → 서버가 200을 빨리 줘서 진행률이 0%에 안멈춤
- * 2. 각 요청에 12초 타임아웃(AbortController) → 뻗으면 그 배치는 원본 그대로 사용
- * 3. 배치가 끝날 때마다 onProgress 호출 → 진행률이 바로바로 올라감
- *
- * 주의:
- * - 중복 제거하지 않습니다(요청사항 반영). INSERT만 사용.
- * - 테이블: word_batches(로그), vocab_words(실제 단어 데이터)
+ * 현재 DB 스키마에 맞게 word_batches.insert 필드명 수정함
+ * (filename, book, chapter, total_rows 만 있음)
  */
 export default function CsvManagePage() {
   const fileRef = useRef(null);
@@ -27,7 +21,7 @@ export default function CsvManagePage() {
 
   // 상태
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0); // 0~1
+  const [progress, setProgress] = useState(0);
   const [resultCsv, setResultCsv] = useState("");
   const [stats, setStats] = useState(null);
   const [rows, setRows] = useState([]);
@@ -54,7 +48,6 @@ export default function CsvManagePage() {
           accepted_ko: (r.accepted_ko ?? r.synonyms_ko ?? r.syn_ko ?? "").toString().trim(),
         }));
     } else {
-      // 헤더 없는 경우
       const lines = text
         .split(/\r?\n/)
         .map((l) => l.trim())
@@ -82,13 +75,8 @@ export default function CsvManagePage() {
     return out;
   }
 
-  /**
-   * 아주 작은 소배치(기본 3줄)를 /api/csv-prepare로 보내서 AI 보정
-   * - 12초 타임아웃
-   * - 실패하면 원본 rowsChunk 그대로 반환
-   */
+  /** 아주 작은 소배치(3줄)를 /api/csv-prepare로 보내서 AI 보정 */
   async function postSmallBatch(rowsChunk, { book, aiFill }) {
-    // 12초 타임아웃
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
 
@@ -107,7 +95,6 @@ export default function CsvManagePage() {
       clearTimeout(timer);
 
       if (!resp.ok) {
-        // 서버가 에러면 원본을 돌려보냄
         return rowsChunk;
       }
 
@@ -118,19 +105,14 @@ export default function CsvManagePage() {
 
       return rowsChunk;
     } catch (e) {
-      // fetch 에러/타임아웃이면 원본 반환
       clearTimeout(timer);
       return rowsChunk;
     }
   }
 
-  /**
-   * 큰 배열을 3줄 단위로 순차 호출
-   * - 호출마다 onProgress 호출 → 진행률 바로 반영
-   * - 서버가 느려도 3줄만 기다리면 되므로 0%에 안멈춤
-   */
+  /** 큰 배열을 3줄씩 순차 처리 */
   async function prepareInTinyBatches(allRows, { book, aiFill, onProgress }) {
-    const MAX_PER_REQ = 3; // 진짜 작게
+    const MAX_PER_REQ = 3;
     const out = [];
     const total = allRows.length || 0;
     let done = 0;
@@ -140,17 +122,14 @@ export default function CsvManagePage() {
       const converted = await postSmallBatch(chunk, { book, aiFill });
       out.push(...converted);
       done += chunk.length;
-
-      if (onProgress) {
-        onProgress(done, total);
-      }
+      if (onProgress) onProgress(done, total);
     }
 
     if (onProgress) onProgress(total, total);
     return out;
   }
 
-  /** CSV → 표준행 → (선택)AI 보정(아주 작은 배치) → rows/state 갱신 */
+  /** 업로드 핸들러 */
   async function handleUpload() {
     setErrorMsg("");
     setStats(null);
@@ -173,7 +152,6 @@ export default function CsvManagePage() {
       let filledRows = parsedRows;
 
       if (fillMissing) {
-        // 아주 작은 배치로 순차 호출
         filledRows = await prepareInTinyBatches(parsedRows, {
           book: fallbackBook,
           aiFill: true,
@@ -184,7 +162,6 @@ export default function CsvManagePage() {
         });
       }
 
-      // 결과 CSV 생성
       const csv = Papa.unparse(filledRows, {
         columns: ["book", "chapter", "term_en", "meaning_ko", "pos", "accepted_ko"],
       });
@@ -192,7 +169,6 @@ export default function CsvManagePage() {
       setRows(filledRows);
       setResultCsv(csv);
 
-      // 간단 통계
       const total = filledRows.length;
       const withPos = filledRows.filter((r) => String(r.pos ?? "").trim() !== "").length;
       const withAcc = filledRows.filter(
@@ -225,6 +201,7 @@ export default function CsvManagePage() {
     URL.revokeObjectURL(url);
   }
 
+  /** ← 여기 테이블 구조에 맞춰서 수정됨 */
   async function registerToSupabase() {
     setErrorMsg("");
     if (!resultCsv || rows.length === 0) {
@@ -234,26 +211,23 @@ export default function CsvManagePage() {
 
     setBusy(true);
     try {
-      // 1) word_batches 로그
-      const batchName = `${stats?.book || "batch"} - ${new Date()
-        .toISOString()
-        .slice(0, 19)
-        .replace("T", " ")}`;
-
+      // 1) word_batches 로그 생성 (테이블 구조에 맞춤)
       const { data: batch, error: e1 } = await supabase
         .from("word_batches")
         .insert({
-          name: batchName,
+          filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
           book: stats?.book || null,
-          source_filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
-          rows_count: rows.length,
+          chapter: null,
+          total_rows: rows.length,
         })
         .select()
         .single();
 
-      if (e1) throw new Error(`[word_batches.insert] ${e1.message}`);
+      if (e1) {
+        throw new Error(`[word_batches.insert] ${e1.message}`);
+      }
 
-      // 2) vocab_words INSERT
+      // 2) vocab_words INSERT (중복 제거 X)
       const CHUNK = 500;
       for (let i = 0; i < rows.length; i += CHUNK) {
         const chunk = rows.slice(i, i + CHUNK).map((r) => ({
@@ -263,7 +237,8 @@ export default function CsvManagePage() {
           meaning_ko: (r.meaning_ko ?? "").toString().trim(),
           pos: (r.pos ?? "").toString().trim(),
           accepted_ko: (r.accepted_ko ?? "").toString().trim(),
-          // batch_id: batch?.id ?? null, // 스키마에 있으면 살리기
+          // 만약 vocab_words에 batch_id 같은 게 있으면 여기서 batch.id 넣으면 됨
+          // batch_id: batch?.id ?? null,
         }));
 
         const { error: e2 } = await supabase.from("vocab_words").insert(chunk);
@@ -271,7 +246,7 @@ export default function CsvManagePage() {
       }
 
       alert(
-        `등록 완료!\n배치: ${batch?.name}\n총 ${rows.length.toLocaleString()}건 등록`
+        `등록 완료!\n배치ID: ${batch?.id}\n총 ${rows.length.toLocaleString()}건 등록`
       );
     } catch (e) {
       setErrorMsg(e.message || String(e));
