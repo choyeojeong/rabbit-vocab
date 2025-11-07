@@ -1,6 +1,12 @@
 // src/App.jsx
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+} from 'react-router-dom';
 
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -19,10 +25,11 @@ import TeacherManagePage from './pages/TeacherManagePage.jsx';
 import TeacherReviewList from './pages/TeacherReviewList';
 import TeacherReviewSession from './pages/TeacherReviewSession';
 import TeacherToday from './pages/TeacherToday';
-import TeacherFocusMonitor from './pages/TeacherFocusMonitor.jsx'; // 이탈 감지 모니터
+import TeacherFocusMonitor from './pages/TeacherFocusMonitor.jsx';
 
-// CSV 관리 (🔁 경로 수정: admin 폴더)
+// CSV 관리
 import CsvManagePage from './pages/admin/CsvManagePage.jsx';
+import CsvBatchListPage from './pages/admin/CsvBatchListPage.jsx';
 
 import { ensureLiveStudent } from './utils/session';
 
@@ -54,7 +61,9 @@ function Protected({ children }) {
         nav('/', { replace: true });
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [nav]);
 
   if (status === 'checking') return null;
@@ -146,22 +155,23 @@ export default function App() {
 
         {/* === 교사용: /teacher/* (TeacherShell 비번 게이트) === */}
         <Route path="/teacher" element={<TeacherShell />}>
-          {/* /teacher → /teacher/home 리다이렉트는 Shell 내부에서 처리한다고 가정 */}
           <Route path="home" element={<TeacherHome />} />
           <Route path="manage" element={<TeacherManagePage />} />
           <Route path="review" element={<TeacherReviewList />} />
           <Route path="review/:id" element={<TeacherReviewSession />} />
           <Route path="today" element={<TeacherToday />} />
           <Route path="focus" element={<TeacherFocusMonitor />} />
-          {/* ⬇ CSV 관리 (교사용 경로) */}
+          {/* CSV 관리 */}
           <Route path="csv" element={<CsvManagePage />} />
+          {/* CSV 업로드 기록 보기 */}
+          <Route path="csv/batches" element={<CsvBatchListPage />} />
         </Route>
 
         {/* === 관리자 alias: /admin/* → TeacherShell 경유로 동일 페이지 제공 === */}
         <Route path="/admin" element={<TeacherShell />}>
           <Route path="users" element={<TeacherManagePage />} />
-          {/* ⬇ CSV 관리 (관리자 경로) */}
           <Route path="csv" element={<CsvManagePage />} />
+          <Route path="csv/batches" element={<CsvBatchListPage />} />
         </Route>
 
         {/* Fallback */}

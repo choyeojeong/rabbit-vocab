@@ -237,7 +237,7 @@ export default function CsvManagePage() {
           meaning_ko: (r.meaning_ko ?? "").toString().trim(),
           pos: (r.pos ?? "").toString().trim(),
           accepted_ko: (r.accepted_ko ?? "").toString().trim(),
-          // 만약 vocab_words에 batch_id 같은 게 있으면 여기서 batch.id 넣으면 됨
+          // batch_id 컬럼이 있다면 여기서 batch.id 연결
           // batch_id: batch?.id ?? null,
         }));
 
@@ -258,7 +258,15 @@ export default function CsvManagePage() {
   return (
     <div style={styles.page}>
       <div style={styles.wrap}>
-        <h1 style={styles.title}>CSV 관리 (AI 자동 변환/보정)</h1>
+        <h1 style={styles.title}>
+          CSV 관리 (AI 자동 변환/보정)
+          <a
+            href="/admin/csv/batches"
+            style={{ marginLeft: 12, fontSize: 13, color: "#ff6fa3" }}
+          >
+            업로드 기록 보기 →
+          </a>
+        </h1>
 
         <div style={styles.card}>
           <div style={styles.row}>
