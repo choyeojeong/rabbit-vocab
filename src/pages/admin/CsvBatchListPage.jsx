@@ -29,7 +29,11 @@ export default function CsvBatchListPage() {
   }, []);
 
   async function handleDelete(id) {
-    if (!window.confirm("정말 이 배치를 삭제할까요? (이건 word_batches만 지웁니다. vocab_words는 안 지움)")) {
+    if (
+      !window.confirm(
+        "정말 이 배치를 삭제할까요? (이건 word_batches만 지웁니다. vocab_words는 안 지움)"
+      )
+    ) {
       return;
     }
     const { error } = await supabase.from("word_batches").delete().eq("id", id);
@@ -40,13 +44,27 @@ export default function CsvBatchListPage() {
     setBatches((prev) => prev.filter((b) => b.id !== id));
   }
 
+  function handleGoRegister(batch) {
+    // 업로드 기록에서 곧바로 등록 페이지로 이동
+    const qs = new URLSearchParams({
+      batchId: String(batch.id),
+      book: batch.book || "",
+      chapter: batch.chapter != null ? String(batch.chapter) : "",
+    });
+    // 라우터에 맞춰서 경로는 프로젝트에 이미 있는 csv 관리 페이지로
+    window.location.href = `/admin/csv-manage?${qs.toString()}`;
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.wrap}>
         <h1 style={styles.title}>CSV 업로드 기록</h1>
         <p style={{ marginBottom: 12, color: "#6b7280" }}>
-          admin에서 등록한 CSV(batch) 목록입니다. 여기서 삭제하면 word_batches 행만 삭제되고,
-          이미 vocab_words에 넣은 단어들은 그대로 남습니다.
+          admin에서 등록한 CSV(batch) 목록입니다. 여기서 삭제하면 word_batches 행만
+          삭제되고, 이미 vocab_words에 넣은 단어들은 그대로 남습니다.
+          <br />
+          업로드만 해두고 등록을 안 했던 파일은 오른쪽의 <b>등록</b> 버튼으로
+          다시 등록할 수 있습니다.
         </p>
 
         <div style={{ marginBottom: 12 }}>
@@ -67,18 +85,19 @@ export default function CsvBatchListPage() {
                 <th>chapter</th>
                 <th style={{ width: 110 }}>행 수</th>
                 <th style={{ width: 90 }}>관리</th>
+                <th style={{ width: 110 }}>등록</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: 16 }}>
+                  <td colSpan={7} style={{ textAlign: "center", padding: 16 }}>
                     불러오는 중...
                   </td>
                 </tr>
               ) : batches.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: 16 }}>
+                  <td colSpan={7} style={{ textAlign: "center", padding: 16 }}>
                     아직 등록된 CSV가 없습니다.
                   </td>
                 </tr>
@@ -96,6 +115,14 @@ export default function CsvBatchListPage() {
                         style={styles.deleteBtn}
                       >
                         삭제
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => handleGoRegister(b)}
+                        style={styles.registerBtn}
+                      >
+                        등록
                       </button>
                     </td>
                   </tr>
@@ -159,5 +186,14 @@ const styles = {
     borderRadius: 6,
     fontSize: 12,
     cursor: "pointer",
+  },
+  registerBtn: {
+    padding: "4px 8px",
+    background: "#e0f2fe",
+    border: "1px solid #bae6fd",
+    borderRadius: 6,
+    fontSize: 12,
+    cursor: "pointer",
+    fontWeight: 600,
   },
 };

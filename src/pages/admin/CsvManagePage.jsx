@@ -1,5 +1,5 @@
 // src/pages/admin/CsvManagePage.jsx
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { supabase } from "../../utils/supabaseClient";
 
@@ -9,8 +9,8 @@ import { supabase } from "../../utils/supabaseClient";
  * - 결과 미리보기 + CSV 다운로드
  * - Supabase 등록(word_batches 로그 + vocab_words 행 INSERT)
  *
- * 현재 DB 스키마에 맞게 word_batches.insert 필드명 수정함
- * (filename, book, chapter, total_rows 만 있음)
+ * word_batches 테이블 컬럼: filename, book, chapter, total_rows
+ * CsvBatchListPage 에서 ?batchId=...&book=...&chapter=... 으로 오면 그 값들을 자동으로 채움
  */
 export default function CsvManagePage() {
   const fileRef = useRef(null);
@@ -18,6 +18,10 @@ export default function CsvManagePage() {
   // 옵션
   const [bookOverride, setBookOverride] = useState("");
   const [fillMissing, setFillMissing] = useState(true);
+
+  // 쿼리에서 넘어온 값
+  const [linkedBatchInfo, setLinkedBatchInfo] = useState(null);
+  const [linkedChapter, setLinkedChapter] = useState("");
 
   // 상태
   const [busy, setBusy] = useState(false);
@@ -27,25 +31,53 @@ export default function CsvManagePage() {
   const [rows, setRows] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // 업로드 기록에서 넘어온 경우 쿼리 파싱
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const batchId = sp.get("batchId");
+    const book = sp.get("book");
+    const chapter = sp.get("chapter");
+    if (batchId || book || chapter) {
+      setLinkedBatchInfo({
+        batchId: batchId || null,
+        book: book || "",
+      });
+      if (book) setBookOverride(book);
+      if (chapter) setLinkedChapter(chapter);
+    }
+  }, []);
+
   const previewRows = useMemo(() => rows.slice(0, 50), [rows]);
 
   /** CSV 파일을 표준 행 구조로 파싱 */
   async function parseCsvFileToRows(file, bookFallback) {
     const text = await file.text();
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
-    const headerMode = Array.isArray(parsed.data) && parsed.meta?.fields?.length > 0;
+    const headerMode =
+      Array.isArray(parsed.data) && parsed.meta?.fields?.length > 0;
     let out = [];
 
     if (headerMode) {
       out = parsed.data
-        .filter((r) => r && Object.values(r).some((v) => String(v ?? "").trim() !== ""))
+        .filter(
+          (r) =>
+            r && Object.values(r).some((v) => String(v ?? "").trim() !== "")
+        )
         .map((r) => ({
           book: (r.book ?? bookFallback ?? "").toString().trim(),
-          chapter: (r.chapter ?? r.chap ?? r.unit ?? r.section ?? "").toString().trim(),
-          term_en: (r.term_en ?? r.en ?? r.english ?? r.word ?? "").toString().trim(),
-          meaning_ko: (r.meaning_ko ?? r.ko ?? r.korean ?? r.meaning ?? "").toString().trim(),
+          chapter: (r.chapter ?? r.chap ?? r.unit ?? r.section ?? "")
+            .toString()
+            .trim(),
+          term_en: (r.term_en ?? r.en ?? r.english ?? r.word ?? "")
+            .toString()
+            .trim(),
+          meaning_ko: (r.meaning_ko ?? r.ko ?? r.korean ?? r.meaning ?? "")
+            .toString()
+            .trim(),
           pos: (r.pos ?? r.part_of_speech ?? "").toString().trim(),
-          accepted_ko: (r.accepted_ko ?? r.synonyms_ko ?? r.syn_ko ?? "").toString().trim(),
+          accepted_ko: (r.accepted_ko ?? r.synonyms_ko ?? r.syn_ko ?? "")
+            .toString()
+            .trim(),
         }));
     } else {
       const lines = text
@@ -69,7 +101,10 @@ export default function CsvManagePage() {
     // 빈 행 제거
     out = out.filter(
       (r) =>
-        r.term_en !== "" || r.meaning_ko !== "" || r.pos !== "" || r.accepted_ko !== ""
+        r.term_en !== "" ||
+        r.meaning_ko !== "" ||
+        r.pos !== "" ||
+        r.accepted_ko !== ""
     );
 
     return out;
@@ -146,7 +181,8 @@ export default function CsvManagePage() {
         return;
       }
 
-      const fallbackBook = (bookOverride || file.name.replace(/\.[^.]+$/, "")).trim();
+      const fallbackBook =
+        (bookOverride || file.name.replace(/\.[^.]+$/, "")).trim();
       const parsedRows = await parseCsvFileToRows(file, fallbackBook);
 
       let filledRows = parsedRows;
@@ -170,7 +206,9 @@ export default function CsvManagePage() {
       setResultCsv(csv);
 
       const total = filledRows.length;
-      const withPos = filledRows.filter((r) => String(r.pos ?? "").trim() !== "").length;
+      const withPos = filledRows.filter(
+        (r) => String(r.pos ?? "").trim() !== ""
+      ).length;
       const withAcc = filledRows.filter(
         (r) => String(r.accepted_ko ?? "").trim() !== ""
       ).length;
@@ -201,7 +239,7 @@ export default function CsvManagePage() {
     URL.revokeObjectURL(url);
   }
 
-  /** ← 여기 테이블 구조에 맞춰서 수정됨 */
+  /** Supabase에 실제로 기록하는 부분 */
   async function registerToSupabase() {
     setErrorMsg("");
     if (!resultCsv || rows.length === 0) {
@@ -211,13 +249,14 @@ export default function CsvManagePage() {
 
     setBusy(true);
     try {
-      // 1) word_batches 로그 생성 (테이블 구조에 맞춤)
+      // 1) word_batches 로그 생성
       const { data: batch, error: e1 } = await supabase
         .from("word_batches")
         .insert({
           filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
-          book: stats?.book || null,
-          chapter: null,
+          book: stats?.book || bookOverride || null,
+          // 쿼리로 넘어온 chapter가 있으면 그걸 우선 사용
+          chapter: linkedChapter ? Number(linkedChapter) || null : null,
           total_rows: rows.length,
         })
         .select()
@@ -232,11 +271,12 @@ export default function CsvManagePage() {
       for (let i = 0; i < rows.length; i += CHUNK) {
         const chunk = rows.slice(i, i + CHUNK).map((r) => ({
           book: (r.book ?? "").toString().trim(),
-chapter: Number(r.chapter) || null,          term_en: (r.term_en ?? "").toString().trim(),
+          chapter: Number(r.chapter) || null,
+          term_en: (r.term_en ?? "").toString().trim(),
           meaning_ko: (r.meaning_ko ?? "").toString().trim(),
           pos: (r.pos ?? "").toString().trim(),
           accepted_ko: (r.accepted_ko ?? "").toString().trim(),
-          // batch_id 컬럼이 있다면 여기서 batch.id 연결
+          // batch_id 필드가 vocab_words에 있으면 여기에 연결
           // batch_id: batch?.id ?? null,
         }));
 
@@ -267,6 +307,27 @@ chapter: Number(r.chapter) || null,          term_en: (r.term_en ?? "").toString
           </a>
         </h1>
 
+        {linkedBatchInfo && (
+          <div
+            style={{
+              background: "#ecfeff",
+              border: "1px solid #bae6fd",
+              borderRadius: 8,
+              padding: 8,
+              marginTop: 8,
+              marginBottom: 8,
+              fontSize: 13,
+            }}
+          >
+            업로드 기록에서 넘어온 배치입니다.
+            {linkedBatchInfo.batchId && (
+              <> (batchId: {linkedBatchInfo.batchId})</>
+            )}
+            <br />
+            이 페이지에서 파일만 다시 업로드한 뒤 Supabase 등록을 눌러주세요.
+          </div>
+        )}
+
         <div style={styles.card}>
           <div style={styles.row}>
             <div style={styles.col}>
@@ -285,6 +346,12 @@ chapter: Number(r.chapter) || null,          term_en: (r.term_en ?? "").toString
                 placeholder="(지정하지 않으면 파일명으로 사용)"
                 style={styles.input}
               />
+              {linkedChapter ? (
+                <div style={{ fontSize: 12, marginTop: 4, color: "#6b7280" }}>
+                  ※ 이 배치는 chapter {linkedChapter} 로 넘어왔습니다.
+                  (word_batches에 같이 저장됨)
+                </div>
+              ) : null}
             </div>
 
             <div style={styles.col}>
@@ -301,7 +368,12 @@ chapter: Number(r.chapter) || null,          term_en: (r.term_en ?? "").toString
           </div>
 
           <div
-            style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}
+            style={{
+              display: "flex",
+              gap: 8,
+              marginTop: 12,
+              alignItems: "center",
+            }}
           >
             <button onClick={handleUpload} disabled={busy} style={styles.btn}>
               {busy ? "처리 중..." : "AI 변환 실행"}
