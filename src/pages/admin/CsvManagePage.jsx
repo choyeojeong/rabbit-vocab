@@ -16,7 +16,7 @@ export default function CsvManagePage() {
   const [bookOverride, setBookOverride] = useState("");
   const [fillMissing, setFillMissing] = useState(true);
 
-  // 쿼리 파라미터에서 넘어온 배치 정보
+  // 업로드 기록에서 넘어온 정보(?batchId=..&book=..&chapter=..)
   const [linkedBatchInfo, setLinkedBatchInfo] = useState(null);
   const [linkedChapter, setLinkedChapter] = useState("");
 
@@ -28,6 +28,7 @@ export default function CsvManagePage() {
   const [rows, setRows] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // 쿼리스트링 읽어서 기본값 세팅
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const batchId = sp.get("batchId");
@@ -45,6 +46,15 @@ export default function CsvManagePage() {
 
   const previewRows = useMemo(() => rows.slice(0, 50), [rows]);
 
+  // 공통: chapter를 안전하게 숫자로 바꾸기 (비어있으면 0, NaN이어도 0)
+  function toSafeChapter(val) {
+    if (val === undefined || val === null || val === "") return 0;
+    const n = Number(val);
+    if (Number.isNaN(n)) return 0;
+    return n;
+  }
+
+  /** CSV 파일을 표준 행 구조로 파싱 */
   async function parseCsvFileToRows(file, bookFallback) {
     const text = await file.text();
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
@@ -75,6 +85,7 @@ export default function CsvManagePage() {
             .trim(),
         }));
     } else {
+      // 헤더가 없는 CSV일 때
       const lines = text
         .split(/\r?\n/)
         .map((l) => l.trim())
@@ -102,9 +113,16 @@ export default function CsvManagePage() {
         r.accepted_ko !== ""
     );
 
+    // 여기서도 한 번 chapter 정리해두면 미리보기에도 반영됨
+    out = out.map((r) => ({
+      ...r,
+      chapter: r.chapter === "" ? "0" : r.chapter,
+    }));
+
     return out;
   }
 
+  /** 아주 작은 소배치(3줄)를 /api/csv-prepare로 보내서 AI 보정 */
   async function postSmallBatch(rowsChunk, { book, aiFill }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
@@ -139,6 +157,7 @@ export default function CsvManagePage() {
     }
   }
 
+  /** 큰 배열을 3줄씩 순차 처리 */
   async function prepareInTinyBatches(allRows, { book, aiFill, onProgress }) {
     const MAX_PER_REQ = 3;
     const out = [];
@@ -157,6 +176,7 @@ export default function CsvManagePage() {
     return out;
   }
 
+  /** 업로드 핸들러 */
   async function handleUpload() {
     setErrorMsg("");
     setStats(null);
@@ -190,9 +210,16 @@ export default function CsvManagePage() {
         });
       }
 
-      const csv = Papa.unparse(filledRows, {
-        columns: ["book", "chapter", "term_en", "meaning_ko", "pos", "accepted_ko"],
-      });
+      // CSV로 다시 풀어낼 때도 chapter 0이 표시되게
+      const csv = Papa.unparse(
+        filledRows.map((r) => ({
+          ...r,
+          chapter: r.chapter === "" ? "0" : r.chapter,
+        })),
+        {
+          columns: ["book", "chapter", "term_en", "meaning_ko", "pos", "accepted_ko"],
+        }
+      );
 
       setRows(filledRows);
       setResultCsv(csv);
@@ -232,10 +259,8 @@ export default function CsvManagePage() {
   }
 
   /**
-   * ✅ 여기서 순서 변경
-   * 1) vocab_words 쪼개서 전부 insert
-   * 2) 전부 성공하면 word_batches 에 1줄 insert
-   * → 이렇게 해야 “진짜 등록된 것만” 업로드 기록 페이지에 보임
+   * 1) vocab_words 전부 insert (chapter 비어있으면 0으로 강제)
+   * 2) 성공하면 word_batches 한 줄 기록
    */
   async function registerToSupabase() {
     setErrorMsg("");
@@ -246,37 +271,47 @@ export default function CsvManagePage() {
 
     setBusy(true);
     try {
-      // 1) vocab_words 먼저 넣기
       const CHUNK = 500;
+
+      // 1) vocab_words 먼저
       for (let i = 0; i < rows.length; i += CHUNK) {
-        const chunk = rows.slice(i, i + CHUNK).map((r) => ({
-          book: (r.book ?? "").toString().trim(),
-          chapter: Number(r.chapter) || null,
-          term_en: (r.term_en ?? "").toString().trim(),
-          meaning_ko: (r.meaning_ko ?? "").toString().trim(),
-          pos: (r.pos ?? "").toString().trim(),
-          accepted_ko: (r.accepted_ko ?? "").toString().trim(),
-          // batch_id: 나중에 word_batches.insert 결과 사용해서 다시 업데이트할 거면 여기서 안 넣고 넘어감
-        }));
+        const chunk = rows.slice(i, i + CHUNK).map((r) => {
+          const safeBook = (r.book ?? stats?.book ?? bookOverride ?? "unknown")
+            .toString()
+            .trim();
+
+          return {
+            book: safeBook,
+            chapter: toSafeChapter(r.chapter),
+            term_en: (r.term_en ?? "").toString().trim(),
+            meaning_ko: (r.meaning_ko ?? "").toString().trim(),
+            pos: (r.pos ?? "").toString().trim(),
+            accepted_ko: (r.accepted_ko ?? "").toString().trim(),
+          };
+        });
 
         const { error: e2 } = await supabase.from("vocab_words").insert(chunk);
-        if (e2) throw new Error(`[vocab_words.insert] ${e2.message}`);
+        if (e2) {
+          throw new Error(`[vocab_words.insert] ${e2.message}`);
+        }
       }
 
-      // 2) 전부 성공했으니까 이제 word_batches 기록 남기기
+      // 2) 모두 성공했으니 word_batches 기록
       const { data: batch, error: e1 } = await supabase
         .from("word_batches")
         .insert({
           filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
-          book: stats?.book || bookOverride || null,
-          chapter: linkedChapter ? Number(linkedChapter) || null : null,
+          book: stats?.book || bookOverride || "unknown",
+          chapter: linkedChapter
+            ? toSafeChapter(linkedChapter)
+            : 0, // 기록도 0으로
           total_rows: rows.length,
         })
         .select()
         .single();
 
       if (e1) {
-        // 여기서 실패해도 단어는 이미 들어갔으니 그냥 메시지만 보여줌
+        // 단어는 이미 들어갔으니 알림만
         throw new Error(
           `[word_batches.insert] 단어는 저장됐지만 기록은 못 남겼습니다: ${e1.message}`
         );
