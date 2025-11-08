@@ -44,6 +44,29 @@ export default function CsvBatchListPage() {
     setBatches((prev) => prev.filter((b) => b.id !== id));
   }
 
+  // ✅ 새로 추가: storage에서 변환 csv 내려받기
+  async function handleDownloadCsv(batch) {
+    // CsvManagePage에서 csv_uploads/{batch.id}.csv 로 올렸다고 가정
+    const path = `${batch.id}.csv`;
+    const { data, error } = await supabase.storage
+      .from("csv_uploads")
+      .download(path);
+
+    if (error) {
+      alert("이 배치에는 저장된 CSV가 없거나, 다운로드에 실패했습니다.");
+      return;
+    }
+
+    const url = URL.createObjectURL(data);
+    const a = document.createElement("a");
+    // 원래 업로드된 파일명이 있으면 그 이름으로, 없으면 batch.id.csv
+    const fname = batch.filename ? batch.filename : `${batch.id}.csv`;
+    a.href = url;
+    a.download = fname;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.wrap}>
@@ -53,6 +76,8 @@ export default function CsvBatchListPage() {
           <br />
           여기서 삭제하면 word_batches 행만 삭제되고,
           이미 vocab_words에 등록된 단어 데이터는 그대로 남습니다.
+          <br />
+          변환한 CSV를 저장해둔 경우 이 화면에서 다시 내려받을 수 있습니다.
         </p>
 
         <div style={{ marginBottom: 12 }}>
@@ -72,7 +97,7 @@ export default function CsvBatchListPage() {
                 <th>book</th>
                 <th>chapter</th>
                 <th style={{ width: 110 }}>행 수</th>
-                <th style={{ width: 90 }}>관리</th>
+                <th style={{ width: 160 }}>관리</th>
               </tr>
             </thead>
             <tbody>
@@ -96,7 +121,13 @@ export default function CsvBatchListPage() {
                     <td>{b.book || "-"}</td>
                     <td>{b.chapter ?? "-"}</td>
                     <td>{b.total_rows ?? "-"}</td>
-                    <td>
+                    <td style={{ display: "flex", gap: 6 }}>
+                      <button
+                        onClick={() => handleDownloadCsv(b)}
+                        style={styles.downloadBtn}
+                      >
+                        CSV 받기
+                      </button>
                       <button
                         onClick={() => handleDelete(b.id)}
                         style={styles.deleteBtn}
@@ -156,6 +187,14 @@ const styles = {
     borderRadius: 8,
     padding: 8,
     color: "#b91c1c",
+  },
+  downloadBtn: {
+    padding: "4px 8px",
+    background: "#e0f2fe",
+    border: "1px solid #bae6fd",
+    borderRadius: 6,
+    fontSize: 12,
+    cursor: "pointer",
   },
   deleteBtn: {
     padding: "4px 8px",

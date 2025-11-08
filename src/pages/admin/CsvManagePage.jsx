@@ -7,7 +7,7 @@ import { supabase } from "../../utils/supabaseClient";
  * CSV Manage Page
  * - 파일 업로드 → 파싱 → /api/csv-prepare 소배치 호출 → 미리보기
  * - "Supabase 등록" 누르면 vocab_words 다 넣은 뒤에 word_batches 한 줄만 기록
- *   → 이렇게 하면 등록 실패한 건 업로드 기록에 안 남음
+ * - 이번 버전: word_batches 기록 뒤에 변환된 CSV도 storage(csv_uploads/{batch.id}.csv)에 저장
  */
 export default function CsvManagePage() {
   const fileRef = useRef(null);
@@ -230,7 +230,7 @@ export default function CsvManagePage() {
             ko.endsWith("의") ||
             ko.endsWith("적인") ||
             ko.endsWith("스러운") ||
-            ko.endsWith("스러워하는") // 혹시 모를 패턴
+            ko.endsWith("스러워하는")
           ) {
             pos = "형용사";
           }
@@ -293,6 +293,7 @@ export default function CsvManagePage() {
   /**
    * 1) vocab_words 전부 insert
    * 2) 성공하면 word_batches 한 줄 기록
+   * 3) 그리고 변환된 CSV를 storage(csv_uploads/{batch.id}.csv)에 업로드
    */
   async function registerToSupabase() {
     setErrorMsg("");
@@ -313,10 +314,7 @@ export default function CsvManagePage() {
             .trim();
 
           // index도 chapter 후보로 본다
-          const rawChapter =
-            r.chapter ??
-            r.index ?? // 혹시 AI 결과가 index만 준 경우
-            "";
+          const rawChapter = r.chapter ?? r.index ?? "";
 
           // pos 비어 있으면 체크 제약 때문에 기본값 넣기
           const pos = (r.pos ?? "").toString().trim() || "기타";
@@ -354,6 +352,26 @@ export default function CsvManagePage() {
         throw new Error(
           `[word_batches.insert] 단어는 저장됐지만 기록은 못 남겼습니다: ${e1.message}`
         );
+      }
+
+      // 3) ✅ 변환된 CSV도 Storage에 업로드해서 나중에 /admin/csv/batches 에서 받을 수 있게
+      if (resultCsv && batch?.id) {
+        const csvBlob = new Blob([resultCsv], {
+          type: "text/csv;charset=utf-8",
+        });
+        const storagePath = `${batch.id}.csv`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from("csv_uploads") // ← 이 버킷 미리 만들어 두세요
+          .upload(storagePath, csvBlob, {
+            upsert: true,
+            contentType: "text/csv",
+          });
+
+        if (uploadErr) {
+          // 단어/배치까지는 성공했으니 에러만 보여주고 끝냄
+          console.warn("CSV storage upload failed:", uploadErr.message);
+        }
       }
 
       alert(
