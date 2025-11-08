@@ -5,12 +5,9 @@ import { supabase } from "../../utils/supabaseClient";
 
 /**
  * CSV Manage Page
- * - 파일 업로드 → (클라이언트에서 CSV 파싱) → /api/csv-prepare를 "아주 작은" 배치(3줄)로 순차 호출(AI 보정)
- * - 결과 미리보기 + CSV 다운로드
- * - Supabase 등록(word_batches 로그 + vocab_words 행 INSERT)
- *
- * word_batches 테이블 컬럼: filename, book, chapter, total_rows
- * CsvBatchListPage 에서 ?batchId=...&book=...&chapter=... 으로 오면 그 값들을 자동으로 채움
+ * - 파일 업로드 → 파싱 → /api/csv-prepare 소배치 호출 → 미리보기
+ * - "Supabase 등록" 누르면 vocab_words 다 넣은 뒤에 word_batches 한 줄만 기록
+ *   → 이렇게 하면 등록 실패한 건 업로드 기록에 안 남음
  */
 export default function CsvManagePage() {
   const fileRef = useRef(null);
@@ -19,7 +16,7 @@ export default function CsvManagePage() {
   const [bookOverride, setBookOverride] = useState("");
   const [fillMissing, setFillMissing] = useState(true);
 
-  // 쿼리에서 넘어온 값
+  // 쿼리 파라미터에서 넘어온 배치 정보
   const [linkedBatchInfo, setLinkedBatchInfo] = useState(null);
   const [linkedChapter, setLinkedChapter] = useState("");
 
@@ -31,7 +28,6 @@ export default function CsvManagePage() {
   const [rows, setRows] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // 업로드 기록에서 넘어온 경우 쿼리 파싱
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     const batchId = sp.get("batchId");
@@ -49,7 +45,6 @@ export default function CsvManagePage() {
 
   const previewRows = useMemo(() => rows.slice(0, 50), [rows]);
 
-  /** CSV 파일을 표준 행 구조로 파싱 */
   async function parseCsvFileToRows(file, bookFallback) {
     const text = await file.text();
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
@@ -110,7 +105,6 @@ export default function CsvManagePage() {
     return out;
   }
 
-  /** 아주 작은 소배치(3줄)를 /api/csv-prepare로 보내서 AI 보정 */
   async function postSmallBatch(rowsChunk, { book, aiFill }) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 12000);
@@ -145,7 +139,6 @@ export default function CsvManagePage() {
     }
   }
 
-  /** 큰 배열을 3줄씩 순차 처리 */
   async function prepareInTinyBatches(allRows, { book, aiFill, onProgress }) {
     const MAX_PER_REQ = 3;
     const out = [];
@@ -164,7 +157,6 @@ export default function CsvManagePage() {
     return out;
   }
 
-  /** 업로드 핸들러 */
   async function handleUpload() {
     setErrorMsg("");
     setStats(null);
@@ -239,7 +231,12 @@ export default function CsvManagePage() {
     URL.revokeObjectURL(url);
   }
 
-  /** Supabase에 실제로 기록하는 부분 */
+  /**
+   * ✅ 여기서 순서 변경
+   * 1) vocab_words 쪼개서 전부 insert
+   * 2) 전부 성공하면 word_batches 에 1줄 insert
+   * → 이렇게 해야 “진짜 등록된 것만” 업로드 기록 페이지에 보임
+   */
   async function registerToSupabase() {
     setErrorMsg("");
     if (!resultCsv || rows.length === 0) {
@@ -249,24 +246,7 @@ export default function CsvManagePage() {
 
     setBusy(true);
     try {
-      // 1) word_batches 로그 생성
-      const { data: batch, error: e1 } = await supabase
-        .from("word_batches")
-        .insert({
-          filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
-          book: stats?.book || bookOverride || null,
-          // 쿼리로 넘어온 chapter가 있으면 그걸 우선 사용
-          chapter: linkedChapter ? Number(linkedChapter) || null : null,
-          total_rows: rows.length,
-        })
-        .select()
-        .single();
-
-      if (e1) {
-        throw new Error(`[word_batches.insert] ${e1.message}`);
-      }
-
-      // 2) vocab_words INSERT (중복 제거 X)
+      // 1) vocab_words 먼저 넣기
       const CHUNK = 500;
       for (let i = 0; i < rows.length; i += CHUNK) {
         const chunk = rows.slice(i, i + CHUNK).map((r) => ({
@@ -276,12 +256,30 @@ export default function CsvManagePage() {
           meaning_ko: (r.meaning_ko ?? "").toString().trim(),
           pos: (r.pos ?? "").toString().trim(),
           accepted_ko: (r.accepted_ko ?? "").toString().trim(),
-          // batch_id 필드가 vocab_words에 있으면 여기에 연결
-          // batch_id: batch?.id ?? null,
+          // batch_id: 나중에 word_batches.insert 결과 사용해서 다시 업데이트할 거면 여기서 안 넣고 넘어감
         }));
 
         const { error: e2 } = await supabase.from("vocab_words").insert(chunk);
         if (e2) throw new Error(`[vocab_words.insert] ${e2.message}`);
+      }
+
+      // 2) 전부 성공했으니까 이제 word_batches 기록 남기기
+      const { data: batch, error: e1 } = await supabase
+        .from("word_batches")
+        .insert({
+          filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
+          book: stats?.book || bookOverride || null,
+          chapter: linkedChapter ? Number(linkedChapter) || null : null,
+          total_rows: rows.length,
+        })
+        .select()
+        .single();
+
+      if (e1) {
+        // 여기서 실패해도 단어는 이미 들어갔으니 그냥 메시지만 보여줌
+        throw new Error(
+          `[word_batches.insert] 단어는 저장됐지만 기록은 못 남겼습니다: ${e1.message}`
+        );
       }
 
       alert(
@@ -324,7 +322,7 @@ export default function CsvManagePage() {
               <> (batchId: {linkedBatchInfo.batchId})</>
             )}
             <br />
-            이 페이지에서 파일만 다시 업로드한 뒤 Supabase 등록을 눌러주세요.
+            이 페이지에서 파일을 다시 업로드한 뒤 “Supabase 등록”을 눌러주세요.
           </div>
         )}
 
@@ -349,7 +347,6 @@ export default function CsvManagePage() {
               {linkedChapter ? (
                 <div style={{ fontSize: 12, marginTop: 4, color: "#6b7280" }}>
                   ※ 이 배치는 chapter {linkedChapter} 로 넘어왔습니다.
-                  (word_batches에 같이 저장됨)
                 </div>
               ) : null}
             </div>
