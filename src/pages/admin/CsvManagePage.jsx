@@ -47,7 +47,6 @@ export default function CsvManagePage() {
   const previewRows = useMemo(() => rows.slice(0, 50), [rows]);
 
   // 공통: chapter를 안전하게 숫자로 바꾸기
-  // (없으면 null로. 0으로 도배되는 것 방지)
   function toSafeChapter(val) {
     if (val === undefined || val === null || val === "") return null;
     const n = Number(val);
@@ -70,10 +69,9 @@ export default function CsvManagePage() {
             r && Object.values(r).some((v) => String(v ?? "").trim() !== "")
         )
         .map((r) => {
-          // index도 chapter 후보로 본다
           const chapterRaw =
             r.chapter ??
-            r.index ?? // ← 원본이 index면 이게 잡힘
+            r.index ??
             r.chap ??
             r.unit ??
             r.section ??
@@ -220,7 +218,7 @@ export default function CsvManagePage() {
         });
       }
 
-      // ✅ 여기서 한 번 더 후처리: pos가 비어 있고 meaning_ko가 "~의"로 끝나면 형용사로 간주
+      // pos 후처리
       const postProcessed = filledRows.map((r) => {
         let pos = (r.pos || "").trim();
         const ko = (r.meaning_ko || "").trim();
@@ -242,7 +240,6 @@ export default function CsvManagePage() {
         };
       });
 
-      // CSV로 다시 풀어낼 때도 chapter 0이 표시되게
       const csv = Papa.unparse(
         postProcessed.map((r) => ({
           ...r,
@@ -313,10 +310,7 @@ export default function CsvManagePage() {
             .toString()
             .trim();
 
-          // index도 chapter 후보로 본다
           const rawChapter = r.chapter ?? r.index ?? "";
-
-          // pos 비어 있으면 체크 제약 때문에 기본값 넣기
           const pos = (r.pos ?? "").toString().trim() || "기타";
           const accepted_ko = (r.accepted_ko ?? "").toString().trim() || null;
 
@@ -336,7 +330,7 @@ export default function CsvManagePage() {
         }
       }
 
-      // 2) 모두 성공했으니 word_batches 기록
+      // 2) word_batches 기록
       const { data: batch, error: e1 } = await supabase
         .from("word_batches")
         .insert({
@@ -354,7 +348,7 @@ export default function CsvManagePage() {
         );
       }
 
-      // 3) ✅ 변환된 CSV도 Storage에 업로드해서 나중에 /admin/csv/batches 에서 받을 수 있게
+      // 3) Storage 업로드
       if (resultCsv && batch?.id) {
         const csvBlob = new Blob([resultCsv], {
           type: "text/csv;charset=utf-8",
@@ -362,15 +356,19 @@ export default function CsvManagePage() {
         const storagePath = `${batch.id}.csv`;
 
         const { error: uploadErr } = await supabase.storage
-          .from("csv_uploads") // ← 이 버킷 미리 만들어 두세요
+          .from("csv_uploads")
           .upload(storagePath, csvBlob, {
-            upsert: true,
+            upsert: true, // 같은 id로 다시 등록할 때 덮어쓰기
             contentType: "text/csv",
           });
 
         if (uploadErr) {
-          // 단어/배치까지는 성공했으니 에러만 보여주고 끝냄
-          console.warn("CSV storage upload failed:", uploadErr.message);
+          // ✅ 여기서 바로 알려줘야 사용자가 버킷이 비어있는 이유를 앎
+          alert(
+            "CSV는 테이블에 저장됐지만 Storage 업로드는 실패했습니다.\n" +
+              uploadErr.message +
+              "\n\nStorage 버킷(csv_uploads)에 insert 권한이 있는지 확인해 주세요."
+          );
         }
       }
 

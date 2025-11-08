@@ -44,40 +44,55 @@ export default function CsvBatchListPage() {
     setBatches((prev) => prev.filter((b) => b.id !== id));
   }
 
-  // ✅ 새로 추가: storage에서 변환 csv 내려받기
+  /**
+   * ✅ storage에서 변환 csv 내려받기
+   * CsvManagePage에서 csv_uploads/{batch.id}.csv 로 올린다는 가정
+   * (버킷에 그 파일이 없으면 지금처럼 alert로 안내)
+   */
   async function handleDownloadCsv(batch) {
-    // CsvManagePage에서 csv_uploads/{batch.id}.csv 로 올렸다고 가정
     const path = `${batch.id}.csv`;
-    const { data, error } = await supabase.storage
-      .from("csv_uploads")
-      .download(path);
 
-    if (error) {
-      alert("이 배치에는 저장된 CSV가 없거나, 다운로드에 실패했습니다.");
-      return;
+    try {
+      const { data, error } = await supabase.storage
+        .from("csv_uploads")
+        .download(path);
+
+      if (error || !data) {
+        // 여기에 왜 실패했는지 설명 추가
+        alert(
+          "이 배치에는 저장된 CSV가 없거나, 다운로드에 실패했습니다.\n" +
+            "방금 올린 배치라면 CsvManagePage에서 Supabase 등록을 다시 실행해 주세요.\n" +
+            `(경로: csv_uploads/${path})`
+        );
+        if (error) console.warn("storage download error:", error.message);
+        return;
+      }
+
+      const url = URL.createObjectURL(data);
+      const a = document.createElement("a");
+      const fname = batch.filename ? batch.filename : `${batch.id}.csv`;
+      a.href = url;
+      a.download = fname;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("다운로드 중 오류가 발생했습니다: " + e.message);
+      console.error(e);
     }
-
-    const url = URL.createObjectURL(data);
-    const a = document.createElement("a");
-    // 원래 업로드된 파일명이 있으면 그 이름으로, 없으면 batch.id.csv
-    const fname = batch.filename ? batch.filename : `${batch.id}.csv`;
-    a.href = url;
-    a.download = fname;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   return (
     <div style={styles.page}>
       <div style={styles.wrap}>
         <h1 style={styles.title}>CSV 업로드 기록</h1>
-        <p style={{ marginBottom: 12, color: "#6b7280" }}>
+        <p style={{ marginBottom: 12, color: "#6b7280", lineHeight: 1.5 }}>
           Supabase에 실제로 등록이 완료된 CSV(batch)만 표시됩니다.
           <br />
-          여기서 삭제하면 word_batches 행만 삭제되고,
-          이미 vocab_words에 등록된 단어 데이터는 그대로 남습니다.
+          여기서 삭제하면 <b>word_batches 행만 삭제</b>되고, 이미{" "}
+          <code>vocab_words</code>에 등록된 단어 데이터는 그대로 남습니다.
           <br />
-          변환한 CSV를 저장해둔 경우 이 화면에서 다시 내려받을 수 있습니다.
+          CsvManagePage에서 변환한 CSV를 <code>csv_uploads/배치ID.csv</code>로
+          저장해둔 경우 이 화면에서 다시 내려받을 수 있습니다.
         </p>
 
         <div style={{ marginBottom: 12 }}>
@@ -97,7 +112,7 @@ export default function CsvBatchListPage() {
                 <th>book</th>
                 <th>chapter</th>
                 <th style={{ width: 110 }}>행 수</th>
-                <th style={{ width: 160 }}>관리</th>
+                <th style={{ width: 170 }}>관리</th>
               </tr>
             </thead>
             <tbody>
