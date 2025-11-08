@@ -46,11 +46,12 @@ export default function CsvManagePage() {
 
   const previewRows = useMemo(() => rows.slice(0, 50), [rows]);
 
-  // 공통: chapter를 안전하게 숫자로 바꾸기 (비어있으면 0, NaN이어도 0)
+  // 공통: chapter를 안전하게 숫자로 바꾸기
+  // (없으면 null로. 0으로 도배되는 것 방지)
   function toSafeChapter(val) {
-    if (val === undefined || val === null || val === "") return 0;
+    if (val === undefined || val === null || val === "") return null;
     const n = Number(val);
-    if (Number.isNaN(n)) return 0;
+    if (Number.isNaN(n)) return null;
     return n;
   }
 
@@ -68,22 +69,31 @@ export default function CsvManagePage() {
           (r) =>
             r && Object.values(r).some((v) => String(v ?? "").trim() !== "")
         )
-        .map((r) => ({
-          book: (r.book ?? bookFallback ?? "").toString().trim(),
-          chapter: (r.chapter ?? r.chap ?? r.unit ?? r.section ?? "")
-            .toString()
-            .trim(),
-          term_en: (r.term_en ?? r.en ?? r.english ?? r.word ?? "")
-            .toString()
-            .trim(),
-          meaning_ko: (r.meaning_ko ?? r.ko ?? r.korean ?? r.meaning ?? "")
-            .toString()
-            .trim(),
-          pos: (r.pos ?? r.part_of_speech ?? "").toString().trim(),
-          accepted_ko: (r.accepted_ko ?? r.synonyms_ko ?? r.syn_ko ?? "")
-            .toString()
-            .trim(),
-        }));
+        .map((r) => {
+          // index도 chapter 후보로 본다
+          const chapterRaw =
+            r.chapter ??
+            r.index ?? // ← 원본이 index면 이게 잡힘
+            r.chap ??
+            r.unit ??
+            r.section ??
+            "";
+
+          return {
+            book: (r.book ?? bookFallback ?? "").toString().trim(),
+            chapter: chapterRaw.toString().trim(),
+            term_en: (r.term_en ?? r.en ?? r.english ?? r.word ?? "")
+              .toString()
+              .trim(),
+            meaning_ko: (r.meaning_ko ?? r.ko ?? r.korean ?? r.meaning ?? "")
+              .toString()
+              .trim(),
+            pos: (r.pos ?? r.part_of_speech ?? "").toString().trim(),
+            accepted_ko: (r.accepted_ko ?? r.synonyms_ko ?? r.syn_ko ?? "")
+              .toString()
+              .trim(),
+          };
+        });
     } else {
       // 헤더가 없는 CSV일 때
       const lines = text
@@ -113,7 +123,7 @@ export default function CsvManagePage() {
         r.accepted_ko !== ""
     );
 
-    // 여기서도 한 번 chapter 정리해두면 미리보기에도 반영됨
+    // 미리보기에서는 비어 있으면 0으로만 보이게
     out = out.map((r) => ({
       ...r,
       chapter: r.chapter === "" ? "0" : r.chapter,
@@ -210,9 +220,31 @@ export default function CsvManagePage() {
         });
       }
 
+      // ✅ 여기서 한 번 더 후처리: pos가 비어 있고 meaning_ko가 "~의"로 끝나면 형용사로 간주
+      const postProcessed = filledRows.map((r) => {
+        let pos = (r.pos || "").trim();
+        const ko = (r.meaning_ko || "").trim();
+
+        if (!pos) {
+          if (
+            ko.endsWith("의") ||
+            ko.endsWith("적인") ||
+            ko.endsWith("스러운") ||
+            ko.endsWith("스러워하는") // 혹시 모를 패턴
+          ) {
+            pos = "형용사";
+          }
+        }
+
+        return {
+          ...r,
+          pos,
+        };
+      });
+
       // CSV로 다시 풀어낼 때도 chapter 0이 표시되게
       const csv = Papa.unparse(
-        filledRows.map((r) => ({
+        postProcessed.map((r) => ({
           ...r,
           chapter: r.chapter === "" ? "0" : r.chapter,
         })),
@@ -221,14 +253,14 @@ export default function CsvManagePage() {
         }
       );
 
-      setRows(filledRows);
+      setRows(postProcessed);
       setResultCsv(csv);
 
-      const total = filledRows.length;
-      const withPos = filledRows.filter(
+      const total = postProcessed.length;
+      const withPos = postProcessed.filter(
         (r) => String(r.pos ?? "").trim() !== ""
       ).length;
-      const withAcc = filledRows.filter(
+      const withAcc = postProcessed.filter(
         (r) => String(r.accepted_ko ?? "").trim() !== ""
       ).length;
 
@@ -259,7 +291,7 @@ export default function CsvManagePage() {
   }
 
   /**
-   * 1) vocab_words 전부 insert (chapter 비어있으면 0으로 강제)
+   * 1) vocab_words 전부 insert
    * 2) 성공하면 word_batches 한 줄 기록
    */
   async function registerToSupabase() {
@@ -280,13 +312,23 @@ export default function CsvManagePage() {
             .toString()
             .trim();
 
+          // index도 chapter 후보로 본다
+          const rawChapter =
+            r.chapter ??
+            r.index ?? // 혹시 AI 결과가 index만 준 경우
+            "";
+
+          // pos 비어 있으면 체크 제약 때문에 기본값 넣기
+          const pos = (r.pos ?? "").toString().trim() || "기타";
+          const accepted_ko = (r.accepted_ko ?? "").toString().trim() || null;
+
           return {
             book: safeBook,
-            chapter: toSafeChapter(r.chapter),
+            chapter: toSafeChapter(rawChapter),
             term_en: (r.term_en ?? "").toString().trim(),
             meaning_ko: (r.meaning_ko ?? "").toString().trim(),
-            pos: (r.pos ?? "").toString().trim(),
-            accepted_ko: (r.accepted_ko ?? "").toString().trim(),
+            pos,
+            accepted_ko,
           };
         });
 
@@ -302,16 +344,13 @@ export default function CsvManagePage() {
         .insert({
           filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
           book: stats?.book || bookOverride || "unknown",
-          chapter: linkedChapter
-            ? toSafeChapter(linkedChapter)
-            : 0, // 기록도 0으로
+          chapter: linkedChapter ? toSafeChapter(linkedChapter) : 0,
           total_rows: rows.length,
         })
         .select()
         .single();
 
       if (e1) {
-        // 단어는 이미 들어갔으니 알림만
         throw new Error(
           `[word_batches.insert] 단어는 저장됐지만 기록은 못 남겼습니다: ${e1.message}`
         );
@@ -394,7 +433,9 @@ export default function CsvManagePage() {
                   checked={fillMissing}
                   onChange={(e) => setFillMissing(e.target.checked)}
                 />
-                <span style={{ marginLeft: 8 }}>비어 있는 pos/accepted_ko 채우기</span>
+                <span style={{ marginLeft: 8 }}>
+                  비어 있는 pos/accepted_ko 채우기
+                </span>
               </label>
             </div>
           </div>
