@@ -80,6 +80,10 @@ export default function OfficialExamPage() {
   const [results, setResults] = useState([]); // [{word, your, ok}]
   const [sessionId, setSessionId] = useState(null); // 포커스 이탈 로그용
 
+  // ✅ 이탈 이벤트 기록용 (관리자 실시간 알림/집중모니터 상세에 쓰임)
+  const [profileMeta, setProfileMeta] = useState({ name: '', teacher_name: null });
+  const lastFocusEventAtRef = useRef(0); // 중복 스팸 방지
+
   // 실제 사용할 챕터 배열 (우선순위: state > query > [])
   const chapterList = useMemo(() => {
     if (chaptersFromState.length) return chaptersFromState;
@@ -111,12 +115,71 @@ export default function OfficialExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [book, chapterList.join(','), start, end]);
 
-  // 포커스 이탈 감지 훅 (sessionId가 생기면 활성화)
+  // 포커스 이탈 감지 훅 (기존 로컬 알림/가드 유지)
   useExamFocusGuard({
     sessionId,
     studentId: me?.id,
     enableAlert: true,
   });
+
+  // ✅ 관리자에게 "어느 페이지든" 실시간 알림이 오게 하려면:
+  // 학생이 이탈할 때마다 public.focus_events 테이블에 INSERT 1줄을 남겨야 함.
+  // (관리자 쪽에서 그 테이블 INSERT를 Realtime 구독 → 토스트 알림)
+  async function reportFocusEvent(eventType, detail = {}) {
+    try {
+      if (!me?.id) return;
+      if (!sessionId) return;             // 세션ID 생긴 뒤부터 기록 (시험 시작 전엔 기록하지 않음)
+      if (phase !== 'exam') return;       // 시험 중일 때만 기록
+
+      // 중복/스팸 방지 (짧은 연속 이벤트)
+      const now = Date.now();
+      if (now - lastFocusEventAtRef.current < 800) return;
+      lastFocusEventAtRef.current = now;
+
+      await supabase.from('focus_events').insert([{
+        session_id: sessionId,
+        student_id: me?.id,
+        student_name: profileMeta?.name || me?.name || '',
+        teacher_name: profileMeta?.teacher_name ?? null,
+        event_type: eventType,   // 'hidden' | 'blur' | 'pagehide' 등
+        detail: {
+          ...detail,
+          book: book || null,
+          at_question: (i + 1) || null,
+          total_questions: seq?.length || null,
+          visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
+          href: typeof window !== 'undefined' ? window.location?.href : null,
+        },
+      }]);
+    } catch {
+      // 이탈 기록 실패는 시험 진행을 막지 않음
+    }
+  }
+
+  // ✅ 실제 이탈 감지 이벤트 바인딩
+  useEffect(() => {
+    if (phase !== 'exam') return;
+    if (!sessionId) return;
+
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') {
+        reportFocusEvent('hidden');
+      }
+    };
+    const onBlur = () => reportFocusEvent('blur');
+    const onPageHide = (e) => reportFocusEvent('pagehide', { persisted: !!e?.persisted });
+
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('blur', onBlur);
+    window.addEventListener('pagehide', onPageHide);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('blur', onBlur);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, sessionId, i, (seq?.length || 0), book, profileMeta?.name, profileMeta?.teacher_name]);
 
   function computeChapterBounds() {
     if (chapterList.length) {
@@ -175,6 +238,9 @@ export default function OfficialExamPage() {
       // 무시
     }
 
+    // ✅ profileMeta 저장 (이탈 이벤트에 같이 적기 위함)
+    setProfileMeta({ name: profileName || '', teacher_name: profileTeacher ?? null });
+
     try {
       const payload = {
         mode: 'official',
@@ -202,6 +268,9 @@ export default function OfficialExamPage() {
       if (error) throw error;
       if (!data?.id) throw new Error('SESSION_INSERT_OK_BUT_NO_ID');
       setSessionId(data.id);
+
+      // (선택) 시험 시작 이벤트도 남기고 싶으면:
+      // reportFocusEvent('exam_start', { chapters_text: chaptersText, num_questions: n, cutoff_miss: c });
     } catch (err) {
       console.error('[OfficialExam] session insert error:', err);
       alert(
@@ -310,6 +379,8 @@ export default function OfficialExamPage() {
           profileName = profile?.name || me?.name || '';
           profileTeacher = profile?.teacher_name || null;
         } catch {}
+
+        setProfileMeta({ name: profileName || '', teacher_name: profileTeacher ?? null });
 
         const { data, error } = await supabase
           .from('test_sessions')

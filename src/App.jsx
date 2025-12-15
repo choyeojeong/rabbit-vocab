@@ -19,6 +19,9 @@ import OfficialExamPage from "./pages/OfficialExamPage";
 import OfficialResultList from "./pages/OfficialResultList";
 import OfficialResultPage from "./pages/OfficialResultPage";
 
+// ✅ 여기! pages/AdminGate.jsx(토스트+Realtime 구독) 를 사용
+import AdminGate from "./pages/AdminGate";
+
 // 교사용
 import TeacherManagePage from "./pages/TeacherManagePage.jsx";
 import TeacherReviewList from "./pages/TeacherReviewList";
@@ -111,23 +114,6 @@ function ProtectedDashboard({ children }) {
   return <>{children}</>;
 }
 
-/**
- * 관리자/교사용 보호 라우트 (prompt 없음)
- */
-function AdminGate() {
-  const nav = useNavigate();
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
-    if (role === "admin") setReady(true);
-    else nav("/", { replace: true });
-  }, [nav]);
-
-  if (!ready) return null;
-  return <Outlet />;
-}
-
 export default function App() {
   return (
     <BrowserRouter>
@@ -218,6 +204,9 @@ export default function App() {
           <Route path="/admin/users" element={<TeacherManagePage />} />
           <Route path="/admin/csv" element={<CsvManagePage />} />
           <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
+
+          {/* (선택) 관리자 alias로도 포커스 모니터 열고 싶으면 */}
+          <Route path="/admin/focus" element={<TeacherFocusMonitor />} />
         </Route>
 
         {/* fallback */}
