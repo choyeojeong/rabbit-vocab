@@ -6,6 +6,7 @@ import {
   Route,
   Navigate,
   useNavigate,
+  Outlet,
 } from "react-router-dom";
 
 import LoginPage from "./pages/LoginPage";
@@ -32,7 +33,7 @@ import CsvBatchListPage from "./pages/admin/CsvBatchListPage.jsx";
 import { ensureLiveStudent } from "./utils/session";
 
 /**
- * 세션 검증용 보호 라우트
+ * 세션 검증용 보호 라우트 (학생)
  */
 function Protected({ children }) {
   const nav = useNavigate();
@@ -63,6 +64,40 @@ function Protected({ children }) {
 
   if (status !== "ok") return null;
   return <>{children}</>;
+}
+
+/**
+ * 관리자/교사용 보호 라우트 (비밀번호 1회만 입력)
+ * - 같은 탭(sessionStorage)에서는 다시 안 물어봄
+ * - 새로고침/새 탭에서는 다시 1회 물어봄 (정상)
+ */
+function AdminGate() {
+  const nav = useNavigate();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const KEY = "admin_authed_v1";
+    const authed = sessionStorage.getItem(KEY);
+
+    if (authed === "1") {
+      setReady(true);
+      return;
+    }
+
+    const expected = import.meta.env.VITE_TEACHER_PASS || "RABBIT";
+    const pw = prompt("관리자 비밀번호를 입력하세요");
+
+    if (pw === expected) {
+      sessionStorage.setItem(KEY, "1");
+      setReady(true);
+    } else {
+      alert("비밀번호가 틀렸습니다.");
+      nav("/", { replace: true });
+    }
+  }, [nav]);
+
+  if (!ready) return null;
+  return <Outlet />;
 }
 
 export default function App() {
@@ -139,19 +174,25 @@ export default function App() {
           }
         />
 
-        {/* === 교사용 라우트 (직접 배치) === */}
-        <Route path="/teacher/manage" element={<TeacherManagePage />} />
-        <Route path="/teacher/review" element={<TeacherReviewList />} />
-        <Route path="/teacher/review/:id" element={<TeacherReviewSession />} />
-        <Route path="/teacher/today" element={<TeacherToday />} />
-        <Route path="/teacher/focus" element={<TeacherFocusMonitor />} />
-        <Route path="/teacher/csv" element={<CsvManagePage />} />
-        <Route path="/teacher/csv/batches" element={<CsvBatchListPage />} />
+        {/* === 교사/관리자 영역: 비번 1회 인증 게이트 === */}
+        <Route element={<AdminGate />}>
+          {/* 교사용 라우트 */}
+          <Route path="/teacher/manage" element={<TeacherManagePage />} />
+          <Route path="/teacher/review" element={<TeacherReviewList />} />
+          <Route
+            path="/teacher/review/:id"
+            element={<TeacherReviewSession />}
+          />
+          <Route path="/teacher/today" element={<TeacherToday />} />
+          <Route path="/teacher/focus" element={<TeacherFocusMonitor />} />
+          <Route path="/teacher/csv" element={<CsvManagePage />} />
+          <Route path="/teacher/csv/batches" element={<CsvBatchListPage />} />
 
-        {/* === 관리자 alias === */}
-        <Route path="/admin/users" element={<TeacherManagePage />} />
-        <Route path="/admin/csv" element={<CsvManagePage />} />
-        <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
+          {/* 관리자 alias */}
+          <Route path="/admin/users" element={<TeacherManagePage />} />
+          <Route path="/admin/csv" element={<CsvManagePage />} />
+          <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
+        </Route>
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

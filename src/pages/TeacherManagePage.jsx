@@ -3,37 +3,12 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../utils/supabaseClient";
 import DeleteStudentButton from "../components/DeleteStudentButton";
 
-const PASS = import.meta.env.VITE_TEACHER_PASS || "RABBIT";
-
 export default function TeacherManagePage() {
   const navigate = useNavigate();
-  const [ok, setOk] = useState(false);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
-
-  useEffect(() => {
-    const has = localStorage.getItem("teacher_ok") === "1";
-    if (!has) {
-      const p = window.prompt("교사 비밀번호를 입력하세요");
-      if (p && p === PASS) {
-        localStorage.setItem("teacher_ok", "1");
-        setOk(true);
-      } else {
-        alert("비밀번호가 올바르지 않습니다.");
-        navigate("/");
-      }
-    } else {
-      setOk(true);
-    }
-  }, [navigate]);
-
-  useEffect(() => {
-    if (!ok) return;
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ok]);
 
   async function load() {
     try {
@@ -70,8 +45,6 @@ export default function TeacherManagePage() {
       );
     });
   }, [q, rows]);
-
-  if (!ok) return null;
 
   return (
     <div style={styles.page}>

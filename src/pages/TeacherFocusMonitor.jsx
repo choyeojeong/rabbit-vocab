@@ -11,20 +11,6 @@ export default function TeacherFocusMonitor() {
   const [filterMode, setFilterMode] = useState("today"); // 'today' | 'all' | 'session'
   const [sessionFilter, setSessionFilter] = useState("");
 
-  // 교사 비번 확인(기존 방식)
-  useEffect(() => {
-    const ok = localStorage.getItem("teacher_pass_ok") === "true";
-    if (!ok) {
-      const input = window.prompt("교사용 비밀번호를 입력하세요");
-      if (input !== import.meta.env.VITE_TEACHER_PASS) {
-        alert("비밀번호가 올바르지 않습니다.");
-        window.location.href = "/";
-      } else {
-        localStorage.setItem("teacher_pass_ok", "true");
-      }
-    }
-  }, []);
-
   const timeRange = useMemo(() => {
     if (filterMode !== "today") return null;
     const start = dayjs().startOf("day").toISOString();
