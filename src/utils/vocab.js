@@ -46,16 +46,36 @@ export async function fetchBooks() {
   return uniq;
 }
 
-/** 특정 책의 챕터 목록(숫자 오름차순) */
+/** 특정 책의 챕터 목록(숫자 오름차순, 전체) */
 export async function fetchChapters(book) {
+  if (!book) return [];
+
+  // 1) 전체 row 개수
+  const head = await supabase
+    .from('vocab_words')
+    .select('chapter', { count: 'exact', head: true })
+    .eq('book', book);
+
+  if (head.error) throw head.error;
+
+  const total = head.count ?? 0;
+  if (!total) return [];
+
+  // 2) 전부 가져오기 (Supabase pagination 우회)
   const { data, error } = await supabase
     .from('vocab_words')
     .select('chapter')
     .eq('book', book)
-    .order('chapter', { ascending: true });
+    .order('chapter', { ascending: true })
+    .range(0, total - 1);
+
   if (error) throw error;
-  const uniq = Array.from(new Set((data || []).map((d) => Number(d.chapter)).filter(Number.isFinite)))
-    .sort((a, b) => a - b);
+
+  // 3) 중복 제거 + 숫자 정렬
+  const uniq = Array.from(
+    new Set((data || []).map(d => Number(d.chapter)).filter(Number.isFinite))
+  ).sort((a, b) => a - b);
+
   return uniq;
 }
 
