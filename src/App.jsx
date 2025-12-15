@@ -1,7 +1,8 @@
 // src/pages/admin/AdminGate.jsx
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
-import { supabase } from "../../utils/supabaseClient";
+import { supabase } from "./utils/supabaseClient";
+
 
 /**
  * AdminGate
