@@ -30,6 +30,7 @@ export default function BookRangePage({ mode = 'practice' }) {
     (async () => {
       setLoadingChapters(true);
       const cs = await fetchChapters(book);
+      console.log('[fetchChapters]', { book, len: cs.length, first: cs[0], last: cs[cs.length - 1], sample: cs.slice(0, 30) });
       setChapters(cs);
       // 초기 진입 시 기본 범위를 자동 채움 (예: 1-끝)
       if (!chapterInput && cs.length) {
