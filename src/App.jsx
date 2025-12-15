@@ -1,217 +1,258 @@
-// src/App.jsx
-import { useEffect, useState } from "react";
-import {
-  BrowserRouter,
-  Routes,
-  Route,
-  Navigate,
-  useNavigate,
-  Outlet,
-} from "react-router-dom";
-
-import LoginPage from "./pages/LoginPage";
-import RegisterPage from "./pages/RegisterPage";
-import Dashboard from "./pages/Dashboard";
-import BookRangePage from "./pages/BookRangePage";
-import PracticeMCQ from "./pages/PracticeMCQ";
-import MockExamPage from "./pages/MockExamPage";
-import OfficialExamPage from "./pages/OfficialExamPage";
-import OfficialResultList from "./pages/OfficialResultList";
-import OfficialResultPage from "./pages/OfficialResultPage";
-
-// ✅ 여기! pages/AdminGate.jsx(토스트+Realtime 구독) 를 사용
-import AdminGate from "./pages/admin/AdminGate";
-
-// 교사용
-import TeacherManagePage from "./pages/TeacherManagePage.jsx";
-import TeacherReviewList from "./pages/TeacherReviewList";
-import TeacherReviewSession from "./pages/TeacherReviewSession";
-import TeacherToday from "./pages/TeacherToday";
-import TeacherFocusMonitor from "./pages/TeacherFocusMonitor.jsx";
-
-// CSV 관리
-import CsvManagePage from "./pages/admin/CsvManagePage.jsx";
-import CsvBatchListPage from "./pages/admin/CsvBatchListPage.jsx";
-
-import { ensureLiveStudent, getSession } from "./utils/session";
+// src/pages/admin/AdminGate.jsx
+import { useEffect, useRef, useState } from "react";
+import { Outlet, useNavigate } from "react-router-dom";
+import { supabase } from "../../utils/supabaseClient";
 
 /**
- * 학생 보호 라우트 (학생 전용)
+ * AdminGate
+ * - 로그인 페이지에서 role=admin 인 경우만 통과
+ * - prompt / 비밀번호 입력 없음
+ * - 관리자 로그인 이후에는 절대 다시 묻지 않음
+ *
+ * ✅ 추가: "집중 모니터(이탈 감지)" 실시간 알림
+ * - 학생이 시험 중 다른 앱/탭으로 이동(blur/hidden/pagehide)하면
+ *   focus_events 테이블에 INSERT가 생기고
+ * - 관리자는 어느 페이지에 있든 AdminGate에서 Realtime 구독으로 토스트 알림을 띄움
+ *
+ * ✅ 추가: 토스트 클릭(버튼) → 해당 세션의 검수페이지로 이동
+ * - /teacher/review/:id (id = test_sessions.id = focus_events.session_id)
  */
-function Protected({ children }) {
-  const nav = useNavigate();
-  const [status, setStatus] = useState("checking"); // checking | ok
+export default function AdminGate() {
+  const navigate = useNavigate();
+  const [ready, setReady] = useState(false);
+
+  // 토스트 UI
+  const [toast, setToast] = useState(null); // { id, title, msg, row }
+  const toastTimerRef = useRef(null);
+
+  // 중복/스팸 방지 (같은 세션에서 짧은 시간 연속 이벤트)
+  const lastBySessionRef = useRef(new Map()); // session_id -> lastTime(ms)
+
+  function showToast(row) {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+
+    const student = row?.student_name || "학생";
+    const type = row?.event_type || "이탈";
+    const when = row?.created_at
+      ? new Date(row.created_at).toLocaleTimeString("ko-KR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
+      : "";
+
+    const typeLabel =
+      type === "hidden"
+        ? "탭/앱 전환"
+        : type === "blur"
+        ? "화면 이탈"
+        : type === "pagehide"
+        ? "페이지 종료/전환"
+        : type;
+
+    setToast({
+      id: row?.id ?? Date.now(),
+      title: `🚨 이탈 감지: ${student}`,
+      msg: `${typeLabel}${when ? ` · ${when}` : ""}`,
+      row,
+    });
+
+    toastTimerRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 6000);
+  }
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const s = await ensureLiveStudent();
-        if (!alive) return;
-        if (!s) {
-          nav("/", { replace: true });
-        } else {
-          setStatus("ok");
-        }
-      } catch {
-        if (!alive) return;
-        nav("/", { replace: true });
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [nav]);
+    const role = sessionStorage.getItem("role");
+    if (role === "admin") {
+      setReady(true);
+      return;
+    }
+    navigate("/", { replace: true });
+  }, [navigate]);
 
-  if (status !== "ok") return null;
-  return <>{children}</>;
-}
-
-/**
- * 대시보드 보호 라우트
- * - 관리자면 바로 통과
- * - 학생이면 ensureLiveStudent로 통과
- */
-function ProtectedDashboard({ children }) {
-  const nav = useNavigate();
-  const [status, setStatus] = useState("checking"); // checking | ok
-
+  // ✅ 실시간 구독
   useEffect(() => {
-    let alive = true;
+    if (!ready) return;
 
-    (async () => {
-      try {
-        const me = getSession?.() || null;
-        const role = me?.role || sessionStorage.getItem("role");
+    const channel = supabase
+      .channel("focus-events-live-admin")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "focus_events" },
+        (payload) => {
+          const row = payload?.new;
+          if (!row) return;
 
-        // 관리자면 바로 OK
-        if (role === "admin") {
-          if (!alive) return;
-          setStatus("ok");
-          return;
+          const sid = row.session_id || "";
+          const now = Date.now();
+          if (sid) {
+            const last = lastBySessionRef.current.get(sid) || 0;
+            if (now - last < 2000) return;
+            lastBySessionRef.current.set(sid, now);
+          }
+
+          showToast(row);
         }
-
-        // 그 외(학생)는 학생 세션 검증
-        const s = await ensureLiveStudent();
-        if (!alive) return;
-        if (!s) {
-          nav("/", { replace: true });
-        } else {
-          setStatus("ok");
-        }
-      } catch {
-        if (!alive) return;
-        nav("/", { replace: true });
-      }
-    })();
+      )
+      .subscribe();
 
     return () => {
-      alive = false;
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
     };
-  }, [nav]);
+  }, [ready]);
 
-  if (status !== "ok") return null;
-  return <>{children}</>;
-}
+  // cleanup timer
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
-export default function App() {
+  if (!ready) return null;
+
+  const sessionId = toast?.row?.session_id || null;
+
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* 공개 */}
-        <Route path="/" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+    <>
+      <Outlet />
 
-        {/* 대시보드: 관리자/학생 공용 */}
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedDashboard>
-              <Dashboard />
-            </ProtectedDashboard>
-          }
-        />
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            zIndex: 99999,
+            width: "min(360px, calc(100vw - 32px))",
+            background: "#fff",
+            border: "1px solid #ffd3e3",
+            borderRadius: 12,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+            padding: 12,
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+              alignItems: "flex-start",
+            }}
+          >
+            <div style={{ fontWeight: 900, fontSize: 14, color: "#333" }}>
+              {toast.title}
+            </div>
+            <button
+              onClick={() => setToast(null)}
+              style={{
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                fontSize: 16,
+                lineHeight: "16px",
+                padding: 2,
+                color: "#999",
+              }}
+              aria-label="닫기"
+              title="닫기"
+            >
+              ×
+            </button>
+          </div>
 
-        {/* 학생 */}
-        <Route
-          path="/study"
-          element={
-            <Protected>
-              <BookRangePage mode="practice" />
-            </Protected>
-          }
-        />
-        <Route
-          path="/practice/mcq"
-          element={
-            <Protected>
-              <PracticeMCQ />
-            </Protected>
-          }
-        />
-        <Route
-          path="/practice/mock"
-          element={
-            <Protected>
-              <MockExamPage />
-            </Protected>
-          }
-        />
-        <Route
-          path="/official"
-          element={
-            <Protected>
-              <BookRangePage mode="official" />
-            </Protected>
-          }
-        />
-        <Route
-          path="/exam/official"
-          element={
-            <Protected>
-              <OfficialExamPage />
-            </Protected>
-          }
-        />
-        <Route
-          path="/exam/official/results"
-          element={
-            <Protected>
-              <OfficialResultList />
-            </Protected>
-          }
-        />
-        <Route
-          path="/exam/official/results/:id"
-          element={
-            <Protected>
-              <OfficialResultPage />
-            </Protected>
-          }
-        />
+          <div style={{ marginTop: 6, fontSize: 13, color: "#555" }}>
+            {toast.msg}
+          </div>
 
-        {/* 관리자 / 교사 */}
-        <Route element={<AdminGate />}>
-          <Route path="/teacher/manage" element={<TeacherManagePage />} />
-          <Route path="/teacher/review" element={<TeacherReviewList />} />
-          <Route path="/teacher/review/:id" element={<TeacherReviewSession />} />
-          <Route path="/teacher/today" element={<TeacherToday />} />
-          <Route path="/teacher/focus" element={<TeacherFocusMonitor />} />
-          <Route path="/teacher/csv" element={<CsvManagePage />} />
-          <Route path="/teacher/csv/batches" element={<CsvBatchListPage />} />
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => {
+                if (sessionId) {
+                  navigate(`/teacher/review/${sessionId}`, { replace: false });
+                  return;
+                }
+                navigate("/teacher/focus", { replace: false });
+              }}
+              style={{
+                border: "none",
+                background: "#ff6fa3",
+                color: "#fff",
+                fontWeight: 800,
+                padding: "8px 10px",
+                borderRadius: 10,
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              검수 페이지로 이동
+            </button>
 
-          {/* 관리자 alias */}
-          <Route path="/admin/users" element={<TeacherManagePage />} />
-          <Route path="/admin/csv" element={<CsvManagePage />} />
-          <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
+            <button
+              onClick={() => navigate("/teacher/focus", { replace: false })}
+              style={{
+                border: "1px solid #ffd3e3",
+                background: "#fff0f5",
+                color: "#b00020",
+                fontWeight: 800,
+                padding: "8px 10px",
+                borderRadius: 10,
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              집중 모니터
+            </button>
 
-          {/* (선택) 관리자 alias로도 포커스 모니터 열고 싶으면 */}
-          <Route path="/admin/focus" element={<TeacherFocusMonitor />} />
-        </Route>
+            <button
+              onClick={() => setToast(null)}
+              style={{
+                border: "1px solid #eee",
+                background: "#f7f7f7",
+                color: "#444",
+                fontWeight: 800,
+                padding: "8px 10px",
+                borderRadius: 10,
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              닫기
+            </button>
+          </div>
 
-        {/* fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+          {toast?.row?.detail && (
+            <div
+              style={{
+                marginTop: 10,
+                fontSize: 12,
+                color: "#777",
+                background: "#fafafa",
+                border: "1px solid #eee",
+                borderRadius: 10,
+                padding: 10,
+                maxHeight: 120,
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {(() => {
+                try {
+                  return JSON.stringify(toast.row.detail, null, 2);
+                } catch {
+                  return String(toast.row.detail);
+                }
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+    </>
   );
 }
