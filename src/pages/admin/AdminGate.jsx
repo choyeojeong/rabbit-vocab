@@ -1,6 +1,6 @@
 // src/pages/AdminGate.jsx
 import { useEffect, useRef, useState } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet, Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "../utils/supabaseClient";
 
 /**
@@ -16,9 +16,20 @@ import { supabase } from "../utils/supabaseClient";
  *
  * ✅ 추가: 토스트 클릭(버튼) → 해당 세션의 검수페이지로 이동
  * - /teacher/review/:id (id = test_sessions.id = focus_events.session_id)
+ *
+ * ✅ 수정: Router 밖에서 useNavigate 오류 방지
+ * - role 체크로 막힐 때는 useNavigate로 리다이렉트하지 않고
+ *   <Navigate />를 반환하도록 변경
  */
 export default function AdminGate() {
   const navigate = useNavigate();
+  const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
+
+  // ✅ admin이 아니면 Router 훅 쓰기 전에 바로 차단 (Navigate로 리다이렉트)
+  if (role !== "admin") {
+    return <Navigate to="/" replace />;
+  }
+
   const [ready, setReady] = useState(false);
 
   // 토스트 UI
@@ -66,18 +77,9 @@ export default function AdminGate() {
   }
 
   useEffect(() => {
-    // 로그인 시점에 심어둔 역할 값
-    // admin | student | null
-    const role = sessionStorage.getItem("role");
-
-    if (role === "admin") {
-      setReady(true);
-      return;
-    }
-
-    // 관리자가 아니면 접근 차단
-    navigate("/", { replace: true });
-  }, [navigate]);
+    // role이 admin이면 준비 OK
+    setReady(true);
+  }, []);
 
   // ✅ 관리자 실시간 이탈 알림: focus_events INSERT 구독
   useEffect(() => {
