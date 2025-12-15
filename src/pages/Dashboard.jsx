@@ -1,5 +1,5 @@
 // src/pages/Dashboard.jsx
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSession, clearSession } from '../utils/session';
 import StudentShell from './StudentShell';
@@ -12,12 +12,26 @@ export default function Dashboard() {
     setMe(getSession());
   }, []);
 
+  const isAdmin = useMemo(() => {
+    // 세션(role) 우선, 없으면 sessionStorage(role)로 보조 판정
+    const roleFromSession = me?.role;
+    const roleFromStorage = sessionStorage.getItem('role');
+    return roleFromSession === 'admin' || roleFromStorage === 'admin';
+  }, [me]);
+
   function logout() {
+    // 앱 세션 정리 + role 플래그 정리 (AdminGate 통과 흔적 제거)
     clearSession();
+    sessionStorage.removeItem('role');
+
+    // 혹시 남아있던 이전 방식 키들도 정리(있어도 무해)
+    sessionStorage.removeItem('admin_authed');
+    sessionStorage.removeItem('admin_authed_v1');
+    localStorage.removeItem('teacher_ok');
+    localStorage.removeItem('teacher_pass_ok');
+
     navigate('/');
   }
-
-  const isAdmin = me?.role === 'admin';
 
   return (
     <StudentShell>
@@ -84,7 +98,6 @@ export default function Dashboard() {
                   >
                     집중 모니터(이탈 감지)
                   </button>
-                  {/* ⬇ 새로 추가: CSV 관리 */}
                   <button
                     className="student-button"
                     onClick={() => navigate('/admin/csv')}

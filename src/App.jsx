@@ -1,3 +1,4 @@
+// src/App.jsx
 import { useEffect, useState } from "react";
 import {
   BrowserRouter,
@@ -29,10 +30,10 @@ import TeacherFocusMonitor from "./pages/TeacherFocusMonitor.jsx";
 import CsvManagePage from "./pages/admin/CsvManagePage.jsx";
 import CsvBatchListPage from "./pages/admin/CsvBatchListPage.jsx";
 
-import { ensureLiveStudent } from "./utils/session";
+import { ensureLiveStudent, getSession } from "./utils/session";
 
 /**
- * 학생 보호 라우트
+ * 학생 보호 라우트 (학생 전용)
  */
 function Protected({ children }) {
   const nav = useNavigate();
@@ -64,9 +65,54 @@ function Protected({ children }) {
 }
 
 /**
- * 관리자 / 교사용 보호 라우트
- * - prompt ❌
- * - 로그인 시 저장된 role=admin 만 검사
+ * 대시보드 보호 라우트
+ * - 관리자면 바로 통과
+ * - 학생이면 ensureLiveStudent로 통과
+ */
+function ProtectedDashboard({ children }) {
+  const nav = useNavigate();
+  const [status, setStatus] = useState("checking"); // checking | ok
+
+  useEffect(() => {
+    let alive = true;
+
+    (async () => {
+      try {
+        const me = getSession?.() || null;
+        const role = me?.role || sessionStorage.getItem("role");
+
+        // 관리자면 바로 OK
+        if (role === "admin") {
+          if (!alive) return;
+          setStatus("ok");
+          return;
+        }
+
+        // 그 외(학생)는 학생 세션 검증
+        const s = await ensureLiveStudent();
+        if (!alive) return;
+        if (!s) {
+          nav("/", { replace: true });
+        } else {
+          setStatus("ok");
+        }
+      } catch {
+        if (!alive) return;
+        nav("/", { replace: true });
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [nav]);
+
+  if (status !== "ok") return null;
+  return <>{children}</>;
+}
+
+/**
+ * 관리자/교사용 보호 라우트 (prompt 없음)
  */
 function AdminGate() {
   const nav = useNavigate();
@@ -74,12 +120,8 @@ function AdminGate() {
 
   useEffect(() => {
     const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
-
-    if (role === "admin") {
-      setReady(true);
-    } else {
-      nav("/", { replace: true });
-    }
+    if (role === "admin") setReady(true);
+    else nav("/", { replace: true });
   }, [nav]);
 
   if (!ready) return null;
@@ -94,15 +136,17 @@ export default function App() {
         <Route path="/" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
 
-        {/* 학생 */}
+        {/* 대시보드: 관리자/학생 공용 */}
         <Route
           path="/dashboard"
           element={
-            <Protected>
+            <ProtectedDashboard>
               <Dashboard />
-            </Protected>
+            </ProtectedDashboard>
           }
         />
+
+        {/* 학생 */}
         <Route
           path="/study"
           element={
@@ -164,10 +208,7 @@ export default function App() {
         <Route element={<AdminGate />}>
           <Route path="/teacher/manage" element={<TeacherManagePage />} />
           <Route path="/teacher/review" element={<TeacherReviewList />} />
-          <Route
-            path="/teacher/review/:id"
-            element={<TeacherReviewSession />}
-          />
+          <Route path="/teacher/review/:id" element={<TeacherReviewSession />} />
           <Route path="/teacher/today" element={<TeacherToday />} />
           <Route path="/teacher/focus" element={<TeacherFocusMonitor />} />
           <Route path="/teacher/csv" element={<CsvManagePage />} />

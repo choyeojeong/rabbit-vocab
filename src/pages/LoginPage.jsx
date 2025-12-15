@@ -72,7 +72,7 @@ export default function LoginPage() {
         else clearRememberedName();
 
         // 관리자 영역으로 이동 (학생 대시보드 대신)
-        navigate('/admin/users');
+        navigate('/dashboard');
       } catch (e) {
         console.error(e);
         sessionStorage.removeItem('role');
