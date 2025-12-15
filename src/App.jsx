@@ -1,4 +1,3 @@
-// src/App.jsx
 import { useEffect, useState } from "react";
 import {
   BrowserRouter,
@@ -19,7 +18,7 @@ import OfficialExamPage from "./pages/OfficialExamPage";
 import OfficialResultList from "./pages/OfficialResultList";
 import OfficialResultPage from "./pages/OfficialResultPage";
 
-// 교사용 (TeacherShell/Home 제거됨)
+// 교사용
 import TeacherManagePage from "./pages/TeacherManagePage.jsx";
 import TeacherReviewList from "./pages/TeacherReviewList";
 import TeacherReviewSession from "./pages/TeacherReviewSession";
@@ -33,11 +32,11 @@ import CsvBatchListPage from "./pages/admin/CsvBatchListPage.jsx";
 import { ensureLiveStudent } from "./utils/session";
 
 /**
- * 세션 검증용 보호 라우트 (학생)
+ * 학생 보호 라우트
  */
 function Protected({ children }) {
   const nav = useNavigate();
-  const [status, setStatus] = useState("checking"); // 'checking' | 'ok' | 'redirect'
+  const [status, setStatus] = useState("checking"); // checking | ok
 
   useEffect(() => {
     let alive = true;
@@ -46,14 +45,12 @@ function Protected({ children }) {
         const s = await ensureLiveStudent();
         if (!alive) return;
         if (!s) {
-          setStatus("redirect");
           nav("/", { replace: true });
         } else {
           setStatus("ok");
         }
-      } catch (e) {
+      } catch {
         if (!alive) return;
-        setStatus("redirect");
         nav("/", { replace: true });
       }
     })();
@@ -67,31 +64,20 @@ function Protected({ children }) {
 }
 
 /**
- * 관리자/교사용 보호 라우트 (비밀번호 1회만 입력)
- * - 같은 탭(sessionStorage)에서는 다시 안 물어봄
- * - 새로고침/새 탭에서는 다시 1회 물어봄 (정상)
+ * 관리자 / 교사용 보호 라우트
+ * - prompt ❌
+ * - 로그인 시 저장된 role=admin 만 검사
  */
 function AdminGate() {
   const nav = useNavigate();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const KEY = "admin_authed_v1";
-    const authed = sessionStorage.getItem(KEY);
+    const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
 
-    if (authed === "1") {
-      setReady(true);
-      return;
-    }
-
-    const expected = import.meta.env.VITE_TEACHER_PASS || "RABBIT";
-    const pw = prompt("관리자 비밀번호를 입력하세요");
-
-    if (pw === expected) {
-      sessionStorage.setItem(KEY, "1");
+    if (role === "admin") {
       setReady(true);
     } else {
-      alert("비밀번호가 틀렸습니다.");
       nav("/", { replace: true });
     }
   }, [nav]);
@@ -104,11 +90,11 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* 공개 라우트 */}
+        {/* 공개 */}
         <Route path="/" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
 
-        {/* 학생 영역 */}
+        {/* 학생 */}
         <Route
           path="/dashboard"
           element={
@@ -174,9 +160,8 @@ export default function App() {
           }
         />
 
-        {/* === 교사/관리자 영역: 비번 1회 인증 게이트 === */}
+        {/* 관리자 / 교사 */}
         <Route element={<AdminGate />}>
-          {/* 교사용 라우트 */}
           <Route path="/teacher/manage" element={<TeacherManagePage />} />
           <Route path="/teacher/review" element={<TeacherReviewList />} />
           <Route
@@ -194,7 +179,7 @@ export default function App() {
           <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
         </Route>
 
-        {/* Fallback */}
+        {/* fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
