@@ -1,46 +1,31 @@
-// src/pages/AdminGate.jsx
 import { useEffect, useRef, useState } from "react";
 import { Outlet, Navigate, useNavigate } from "react-router-dom";
-import { supabase } from "../utils/supabaseClient";
+import { supabase } from "../../utils/supabaseClient";
 
 /**
  * AdminGate
- * - 로그인 페이지에서 role=admin 인 경우만 통과
+ * - 로그인에서 role=admin 인 경우만 통과
  * - prompt / 비밀번호 입력 없음
- * - 관리자 로그인 이후에는 절대 다시 묻지 않음
- *
- * ✅ 추가: "집중 모니터(이탈 감지)" 실시간 알림
- * - 학생이 시험 중 다른 앱/탭으로 이동(blur/hidden/pagehide)하면
- *   focus_events 테이블에 INSERT가 생기고
- * - 관리자는 어느 페이지에 있든 AdminGate에서 Realtime 구독으로 토스트 알림을 띄움
- *
- * ✅ 추가: 토스트 클릭(버튼) → 해당 세션의 검수페이지로 이동
- * - /teacher/review/:id (id = test_sessions.id = focus_events.session_id)
- *
- * ✅ 수정: Router 밖에서 useNavigate 오류 방지
- * - role 체크로 막힐 때는 useNavigate로 리다이렉트하지 않고
- *   <Navigate />를 반환하도록 변경
+ * - 관리자 어느 페이지에 있든 "이탈 감지" INSERT 발생 시 토스트 알림
+ * - 토스트 버튼 클릭 → 해당 세션 검수 페이지(/teacher/review/:id)로 이동
  */
 export default function AdminGate() {
   const navigate = useNavigate();
   const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
 
-  // ✅ admin이 아니면 Router 훅 쓰기 전에 바로 차단 (Navigate로 리다이렉트)
+  // admin 아니면 즉시 차단
   if (role !== "admin") {
     return <Navigate to="/" replace />;
   }
-
-  const [ready, setReady] = useState(false);
 
   // 토스트 UI
   const [toast, setToast] = useState(null); // { id, title, msg, row }
   const toastTimerRef = useRef(null);
 
-  // 중복/스팸 방지 (같은 세션에서 짧은 시간 연속 이벤트)
+  // 중복/스팸 방지: 같은 session_id에서 짧은 시간 연속 이벤트 무시
   const lastBySessionRef = useRef(new Map()); // session_id -> lastTime(ms)
 
   function showToast(row) {
-    // 기존 타이머 정리
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
 
     const student = row?.student_name || "학생";
@@ -76,15 +61,8 @@ export default function AdminGate() {
     }, 6000);
   }
 
-  useEffect(() => {
-    // role이 admin이면 준비 OK
-    setReady(true);
-  }, []);
-
   // ✅ 관리자 실시간 이탈 알림: focus_events INSERT 구독
   useEffect(() => {
-    if (!ready) return;
-
     const channel = supabase
       .channel("focus-events-live-admin")
       .on(
@@ -115,7 +93,7 @@ export default function AdminGate() {
         // ignore
       }
     };
-  }, [ready]);
+  }, []);
 
   // cleanup toast timer on unmount
   useEffect(() => {
@@ -123,8 +101,6 @@ export default function AdminGate() {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, []);
-
-  if (!ready) return null;
 
   const sessionId = toast?.row?.session_id || null;
 
@@ -183,14 +159,7 @@ export default function AdminGate() {
             {toast.msg}
           </div>
 
-          <div
-            style={{
-              marginTop: 10,
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-            }}
-          >
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               onClick={() => {
                 // ✅ 토스트 → 해당 세션 검수페이지로 이동
@@ -249,7 +218,7 @@ export default function AdminGate() {
             </button>
           </div>
 
-          {/* (선택) 아주 간단한 디테일 미리보기 */}
+          {/* (선택) detail 미리보기 */}
           {toast?.row?.detail && (
             <div
               style={{

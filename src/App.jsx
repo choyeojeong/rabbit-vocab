@@ -1,259 +1,208 @@
-// src/pages/admin/AdminGate.jsx
-import { useEffect, useRef, useState } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
-import { supabase } from "./utils/supabaseClient";
+// src/App.jsx
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
+// 공개
+import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
 
-/**
- * AdminGate
- * - 로그인 페이지에서 role=admin 인 경우만 통과
- * - prompt / 비밀번호 입력 없음
- * - 관리자 로그인 이후에는 절대 다시 묻지 않음
- *
- * ✅ 추가: "집중 모니터(이탈 감지)" 실시간 알림
- * - 학생이 시험 중 다른 앱/탭으로 이동(blur/hidden/pagehide)하면
- *   focus_events 테이블에 INSERT가 생기고
- * - 관리자는 어느 페이지에 있든 AdminGate에서 Realtime 구독으로 토스트 알림을 띄움
- *
- * ✅ 추가: 토스트 클릭(버튼) → 해당 세션의 검수페이지로 이동
- * - /teacher/review/:id (id = test_sessions.id = focus_events.session_id)
- */
-export default function AdminGate() {
+// 공용
+import Dashboard from "./pages/Dashboard";
+
+// 학생
+import BookRangePage from "./pages/BookRangePage";
+import PracticeMCQ from "./pages/PracticeMCQ";
+import MockExamPage from "./pages/MockExamPage";
+import OfficialExamPage from "./pages/OfficialExamPage";
+import OfficialResultList from "./pages/OfficialResultList";
+import OfficialResultPage from "./pages/OfficialResultPage";
+
+// 교사 / 관리자
+import TeacherManagePage from "./pages/TeacherManagePage";
+import TeacherReviewList from "./pages/TeacherReviewList";
+import TeacherReviewSession from "./pages/TeacherReviewSession";
+import TeacherToday from "./pages/TeacherToday";
+import TeacherFocusMonitor from "./pages/TeacherFocusMonitor";
+
+// CSV 관리
+import CsvManagePage from "./pages/admin/CsvManagePage";
+import CsvBatchListPage from "./pages/admin/CsvBatchListPage";
+
+// ✅ 관리자 게이트 (전역 토스트 + Realtime)
+import AdminGate from "./pages/admin/AdminGate";
+
+// 학생 보호
+import { ensureLiveStudent, getSession } from "./utils/session";
+
+/* =========================
+   학생 전용 보호 라우트
+========================= */
+function Protected({ children }) {
   const navigate = useNavigate();
-  const [ready, setReady] = useState(false);
-
-  // 토스트 UI
-  const [toast, setToast] = useState(null); // { id, title, msg, row }
-  const toastTimerRef = useRef(null);
-
-  // 중복/스팸 방지 (같은 세션에서 짧은 시간 연속 이벤트)
-  const lastBySessionRef = useRef(new Map()); // session_id -> lastTime(ms)
-
-  function showToast(row) {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-
-    const student = row?.student_name || "학생";
-    const type = row?.event_type || "이탈";
-    const when = row?.created_at
-      ? new Date(row.created_at).toLocaleTimeString("ko-KR", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })
-      : "";
-
-    const typeLabel =
-      type === "hidden"
-        ? "탭/앱 전환"
-        : type === "blur"
-        ? "화면 이탈"
-        : type === "pagehide"
-        ? "페이지 종료/전환"
-        : type;
-
-    setToast({
-      id: row?.id ?? Date.now(),
-      title: `🚨 이탈 감지: ${student}`,
-      msg: `${typeLabel}${when ? ` · ${when}` : ""}`,
-      row,
-    });
-
-    toastTimerRef.current = setTimeout(() => {
-      setToast(null);
-      toastTimerRef.current = null;
-    }, 6000);
-  }
+  const [ok, setOk] = useState(false);
 
   useEffect(() => {
-    const role = sessionStorage.getItem("role");
-    if (role === "admin") {
-      setReady(true);
-      return;
-    }
-    navigate("/", { replace: true });
+    let alive = true;
+    (async () => {
+      try {
+        const s = await ensureLiveStudent();
+        if (!alive) return;
+        if (!s) navigate("/", { replace: true });
+        else setOk(true);
+      } catch {
+        if (!alive) return;
+        navigate("/", { replace: true });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, [navigate]);
 
-  // ✅ 실시간 구독
+  if (!ok) return null;
+  return children;
+}
+
+/* =========================
+   대시보드 보호 (관리자/학생)
+========================= */
+function ProtectedDashboard({ children }) {
+  const navigate = useNavigate();
+  const [ok, setOk] = useState(false);
+
   useEffect(() => {
-    if (!ready) return;
-
-    const channel = supabase
-      .channel("focus-events-live-admin")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "focus_events" },
-        (payload) => {
-          const row = payload?.new;
-          if (!row) return;
-
-          const sid = row.session_id || "";
-          const now = Date.now();
-          if (sid) {
-            const last = lastBySessionRef.current.get(sid) || 0;
-            if (now - last < 2000) return;
-            lastBySessionRef.current.set(sid, now);
-          }
-
-          showToast(row);
-        }
-      )
-      .subscribe();
-
-    return () => {
+    let alive = true;
+    (async () => {
       try {
-        supabase.removeChannel(channel);
-      } catch {}
-    };
-  }, [ready]);
+        const me = getSession?.();
+        const role = me?.role || sessionStorage.getItem("role");
 
-  // cleanup timer
-  useEffect(() => {
+        if (role === "admin") {
+          if (!alive) return;
+          setOk(true);
+          return;
+        }
+
+        const s = await ensureLiveStudent();
+        if (!alive) return;
+        if (!s) navigate("/", { replace: true });
+        else setOk(true);
+      } catch {
+        if (!alive) return;
+        navigate("/", { replace: true });
+      }
+    })();
+
     return () => {
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      alive = false;
     };
-  }, []);
+  }, [navigate]);
 
-  if (!ready) return null;
+  if (!ok) return null;
+  return children;
+}
 
-  const sessionId = toast?.row?.session_id || null;
-
+/* =========================
+   App Router
+========================= */
+export default function App() {
   return (
-    <>
-      <Outlet />
+    <BrowserRouter>
+      <Routes>
+        {/* 공개 */}
+        <Route path="/" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
 
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            right: 16,
-            bottom: 16,
-            zIndex: 99999,
-            width: "min(360px, calc(100vw - 32px))",
-            background: "#fff",
-            border: "1px solid #ffd3e3",
-            borderRadius: 12,
-            boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
-            padding: 12,
-          }}
-          role="status"
-          aria-live="polite"
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 8,
-              alignItems: "flex-start",
-            }}
-          >
-            <div style={{ fontWeight: 900, fontSize: 14, color: "#333" }}>
-              {toast.title}
-            </div>
-            <button
-              onClick={() => setToast(null)}
-              style={{
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                fontSize: 16,
-                lineHeight: "16px",
-                padding: 2,
-                color: "#999",
-              }}
-              aria-label="닫기"
-              title="닫기"
-            >
-              ×
-            </button>
-          </div>
+        {/* 대시보드 (공용) */}
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedDashboard>
+              <Dashboard />
+            </ProtectedDashboard>
+          }
+        />
 
-          <div style={{ marginTop: 6, fontSize: 13, color: "#555" }}>
-            {toast.msg}
-          </div>
+        {/* 학생 */}
+        <Route
+          path="/study"
+          element={
+            <Protected>
+              <BookRangePage mode="practice" />
+            </Protected>
+          }
+        />
+        <Route
+          path="/practice/mcq"
+          element={
+            <Protected>
+              <PracticeMCQ />
+            </Protected>
+          }
+        />
+        <Route
+          path="/practice/mock"
+          element={
+            <Protected>
+              <MockExamPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/official"
+          element={
+            <Protected>
+              <BookRangePage mode="official" />
+            </Protected>
+          }
+        />
+        <Route
+          path="/exam/official"
+          element={
+            <Protected>
+              <OfficialExamPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/exam/official/results"
+          element={
+            <Protected>
+              <OfficialResultList />
+            </Protected>
+          }
+        />
+        <Route
+          path="/exam/official/results/:id"
+          element={
+            <Protected>
+              <OfficialResultPage />
+            </Protected>
+          }
+        />
 
-          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              onClick={() => {
-                if (sessionId) {
-                  navigate(`/teacher/review/${sessionId}`, { replace: false });
-                  return;
-                }
-                navigate("/teacher/focus", { replace: false });
-              }}
-              style={{
-                border: "none",
-                background: "#ff6fa3",
-                color: "#fff",
-                fontWeight: 800,
-                padding: "8px 10px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-            >
-              검수 페이지로 이동
-            </button>
+        {/* 관리자 / 교사 (AdminGate 내부) */}
+        <Route element={<AdminGate />}>
+          <Route path="/teacher/manage" element={<TeacherManagePage />} />
+          <Route path="/teacher/review" element={<TeacherReviewList />} />
+          <Route path="/teacher/review/:id" element={<TeacherReviewSession />} />
+          <Route path="/teacher/today" element={<TeacherToday />} />
+          <Route path="/teacher/focus" element={<TeacherFocusMonitor />} />
 
-            <button
-              onClick={() => navigate("/teacher/focus", { replace: false })}
-              style={{
-                border: "1px solid #ffd3e3",
-                background: "#fff0f5",
-                color: "#b00020",
-                fontWeight: 800,
-                padding: "8px 10px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-            >
-              집중 모니터
-            </button>
+          {/* ✅ CSV (teacher 경로도 유지하는 게 안전) */}
+          <Route path="/teacher/csv" element={<CsvManagePage />} />
+          <Route path="/teacher/csv/batches" element={<CsvBatchListPage />} />
 
-            <button
-              onClick={() => setToast(null)}
-              style={{
-                border: "1px solid #eee",
-                background: "#f7f7f7",
-                color: "#444",
-                fontWeight: 800,
-                padding: "8px 10px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-            >
-              닫기
-            </button>
-          </div>
+          {/* 관리자 alias */}
+          <Route path="/admin/users" element={<TeacherManagePage />} />
+          <Route path="/admin/csv" element={<CsvManagePage />} />
+          <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
+        </Route>
 
-          {toast?.row?.detail && (
-            <div
-              style={{
-                marginTop: 10,
-                fontSize: 12,
-                color: "#777",
-                background: "#fafafa",
-                border: "1px solid #eee",
-                borderRadius: 10,
-                padding: 10,
-                maxHeight: 120,
-                overflow: "auto",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
-              }}
-            >
-              {(() => {
-                try {
-                  return JSON.stringify(toast.row.detail, null, 2);
-                } catch {
-                  return String(toast.row.detail);
-                }
-              })()}
-            </div>
-          )}
-        </div>
-      )}
-    </>
+        {/* fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
