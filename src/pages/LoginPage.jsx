@@ -55,20 +55,27 @@ export default function LoginPage() {
 
     if (!nm) return setErr('이름을 입력해 주세요.');
 
-    // ✅ 1) 관리자 로그인 분기: 이름 rabbit + 비밀번호 habit
-    if (nm.toLowerCase() === 'rabbit' && l4 === 'habit') {
+    // ✅ 1) 관리자 로그인 분기: (코드는 유지) habit / rabbit
+    if (nm.toLowerCase() === 'habit' && l4 === 'rabbit') {
       setLoading(true);
       try {
+        // 로그인 성공 → 관리자 role 저장 (AdminGate가 이 값을 보고 통과)
+        sessionStorage.setItem('role', 'admin');
+
         setSession({
           id: 'admin-local',
           name: '관리자',
           role: 'admin',
         });
+
         if (remember) saveRememberedName(nm);
         else clearRememberedName();
-        navigate('/dashboard');
+
+        // 관리자 영역으로 이동 (학생 대시보드 대신)
+        navigate('/admin/users');
       } catch (e) {
         console.error(e);
+        sessionStorage.removeItem('role');
         setErr('로그인 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.');
       } finally {
         setLoading(false);
@@ -83,25 +90,25 @@ export default function LoginPage() {
 
     setLoading(true);
     try {
-      // ✅ DB에 실제로 존재하는 학생인지 단일행 확인
       const { data, error } = await supabase
         .from('profiles')
         .select('id, name, role, school, grade')
         .eq('name', nm)
         .eq('phone_last4', l4)
         .eq('role', 'student')
-        .maybeSingle(); // 없으면 data = null, error = null
+        .maybeSingle();
 
       if (error) throw error;
 
       if (!data) {
-        // 존재하지 않음 → 세션 저장 금지
         setErr('일치하는 학생을 찾을 수 없어요. 이름과 뒷 4자리를 확인해 주세요.');
         if (!remember) clearRememberedName();
         return;
       }
 
-      // ✅ 존재할 때만 세션/기억 저장
+      // 로그인 성공 → 학생 role 저장 (AdminGate 차단용)
+      sessionStorage.setItem('role', 'student');
+
       setSession({
         id: data.id,
         name: data.name,
@@ -116,6 +123,7 @@ export default function LoginPage() {
       navigate('/dashboard');
     } catch (e) {
       console.error(e);
+      sessionStorage.removeItem('role');
       setErr('로그인 중 오류가 발생했어요. 잠시 후 다시 시도해 주세요.');
     } finally {
       setLoading(false);
@@ -137,7 +145,7 @@ export default function LoginPage() {
             <label style={styles.label}>이름</label>
             <input
               className="student-input"
-              placeholder="예: 홍길동 (관리자: rabbit)"
+              placeholder="예: 홍길동"
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoComplete="name"
@@ -149,10 +157,10 @@ export default function LoginPage() {
             <label style={styles.label}>전화번호 뒷 4자리</label>
             <input
               className="student-input"
-              placeholder="예: 1234 (관리자 비밀번호: habit)"
+              placeholder="예: 1234"
               value={last4}
               onChange={(e) => setLast4(e.target.value.replace(/\s/g, '').slice(0, 5))}
-              // 관리자는 habit(문자열) 허용, 학생은 숫자4자리 → 입력단에서 숫자만 강제하지 않음
+              // 관리자(habit)도 입력되어야 하므로 숫자만 강제하지 않음
               inputMode="text"
               maxLength={5}
             />
@@ -169,7 +177,12 @@ export default function LoginPage() {
 
           {err && <div style={styles.error}>{err}</div>}
 
-          <button type="submit" className="student-button" style={{ marginTop: 8 }} disabled={loading}>
+          <button
+            type="submit"
+            className="student-button"
+            style={{ marginTop: 8 }}
+            disabled={loading}
+          >
             {loading ? '로그인 중…' : '로그인'}
           </button>
 
@@ -188,10 +201,6 @@ export default function LoginPage() {
               회원가입
             </Link>
             <span style={{ color: '#aaa' }}>Rabbit 🐰</span>
-          </div>
-
-          <div style={{ marginTop: 10, fontSize: 12, color: '#888', textAlign: 'center' }}>
-            관리자: 이름 <b>rabbit</b> / 비밀번호 <b>habit</b>
           </div>
         </div>
       </form>
