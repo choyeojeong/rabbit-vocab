@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "../utils/supabaseClient";
 import DeleteStudentButton from "../components/DeleteStudentButton";
 
 export default function TeacherManagePage() {
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [rows, setRows] = useState([]);
@@ -16,7 +14,6 @@ export default function TeacherManagePage() {
       setErr("");
 
       // profiles 테이블 기준 (Rabbit 단어앱)
-      // 필요한 컬럼만 가져옵니다.
       const { data, error } = await supabase
         .from("profiles")
         .select("id, name, school, grade, phone, teacher_name")
@@ -31,6 +28,11 @@ export default function TeacherManagePage() {
       setLoading(false);
     }
   }
+
+  // 최초 로드
+  useEffect(() => {
+    load();
+  }, []);
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -49,17 +51,15 @@ export default function TeacherManagePage() {
   return (
     <div style={styles.page}>
       <div style={styles.box}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        {/* 상단 타이틀만 유지 */}
+        <div style={{ display: "flex", alignItems: "center" }}>
           <h1 style={styles.title}>학생관리</h1>
-          <button onClick={()=>navigate("/teacher")} style={styles.back}>
-            ← 교사용 홈
-          </button>
         </div>
 
         <div style={styles.toolbar}>
           <input
             value={q}
-            onChange={(e)=>setQ(e.target.value)}
+            onChange={(e) => setQ(e.target.value)}
             placeholder="이름/학교/학년/담당T/전화번호 검색"
             style={styles.input}
           />
@@ -70,7 +70,7 @@ export default function TeacherManagePage() {
 
         {err && <div style={styles.err}>오류: {err}</div>}
 
-        <div style={{overflowX:"auto"}}>
+        <div style={{ overflowX: "auto" }}>
           <table style={styles.table}>
             <thead>
               <tr>
@@ -79,7 +79,7 @@ export default function TeacherManagePage() {
                 <th>학년</th>
                 <th>담당T</th>
                 <th>전화</th>
-                <th style={{width:160}}>작업</th>
+                <th style={{ width: 160 }}>작업</th>
               </tr>
             </thead>
             <tbody>
@@ -101,7 +101,14 @@ export default function TeacherManagePage() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{textAlign:"center", color:"#777", padding:"18px"}}>
+                  <td
+                    colSpan={6}
+                    style={{
+                      textAlign: "center",
+                      color: "#777",
+                      padding: "18px",
+                    }}
+                  >
                     검색 결과가 없습니다.
                   </td>
                 </tr>
@@ -109,7 +116,6 @@ export default function TeacherManagePage() {
             </tbody>
           </table>
         </div>
-
       </div>
     </div>
   );
@@ -118,23 +124,34 @@ export default function TeacherManagePage() {
 const styles = {
   page: { minHeight: "100vh", background: "#fff5f8", padding: 24 },
   box: {
-    maxWidth: 1100, margin: "0 auto", background: "#fff", borderRadius: 12,
-    padding: 24, boxShadow: "0 8px 24px rgba(255,192,217,0.35)"
+    maxWidth: 1100,
+    margin: "0 auto",
+    background: "#fff",
+    borderRadius: 12,
+    padding: 24,
+    boxShadow: "0 8px 24px rgba(255,192,217,0.35)",
   },
   title: { fontSize: 22, fontWeight: 800, color: "#ff6fa3", margin: 0 },
-  back: {
-    background:"#ddd", border:"none", padding:"8px 12px", borderRadius:8, cursor:"pointer"
-  },
-  toolbar: { display:"flex", gap:10, margin:"14px 0" },
+  toolbar: { display: "flex", gap: 10, margin: "14px 0" },
   input: {
-    flex:1, padding:"10px 12px", border:"1px solid #e8a9bf", borderRadius:8, fontSize:14
+    flex: 1,
+    padding: "10px 12px",
+    border: "1px solid #e8a9bf",
+    borderRadius: 8,
+    fontSize: 14,
   },
   reload: {
-    background:"#ff6fa3", color:"#fff", border:"none", padding:"10px 12px",
-    borderRadius:8, cursor:"pointer"
+    background: "#ff6fa3",
+    color: "#fff",
+    border: "none",
+    padding: "10px 12px",
+    borderRadius: 8,
+    cursor: "pointer",
   },
-  err: { color:"#c00", marginBottom:10 },
+  err: { color: "#c00", marginBottom: 10 },
   table: {
-    width:"100%", borderCollapse:"separate", borderSpacing:0
-  }
+    width: "100%",
+    borderCollapse: "separate",
+    borderSpacing: 0,
+  },
 };
