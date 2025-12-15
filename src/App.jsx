@@ -20,7 +20,7 @@ import OfficialResultList from "./pages/OfficialResultList";
 import OfficialResultPage from "./pages/OfficialResultPage";
 
 // ✅ 여기! pages/AdminGate.jsx(토스트+Realtime 구독) 를 사용
-import AdminGate from "./pages/AdminGate";
+import AdminGate from "./pages/admin/AdminGate";
 
 // 교사용
 import TeacherManagePage from "./pages/TeacherManagePage.jsx";
