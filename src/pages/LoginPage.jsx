@@ -159,10 +159,10 @@ export default function LoginPage() {
               className="student-input"
               placeholder="예: 1234"
               value={last4}
-              onChange={(e) => setLast4(e.target.value.replace(/\s/g, '').slice(0, 5))}
+              onChange={(e) => setLast4(e.target.value.replace(/\s/g, '').slice(0, 20))}
               // 관리자(habit)도 입력되어야 하므로 숫자만 강제하지 않음
               inputMode="text"
-              maxLength={5}
+              maxLength={20}
             />
           </div>
 
