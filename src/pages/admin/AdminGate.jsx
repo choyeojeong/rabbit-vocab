@@ -6,8 +6,8 @@ import { supabase } from "../../utils/supabaseClient";
  * AdminGate
  * - 로그인에서 role=admin 인 경우만 통과
  * - prompt / 비밀번호 입력 없음
- * - 관리자 어느 페이지에 있든 "이탈 감지" INSERT 발생 시 토스트 알림
- * - 토스트 버튼 클릭 → 해당 세션 검수 페이지(/teacher/review/:id)로 이동
+ * - 관리자 어느 페이지에 있든 "이탈 감지" 발생 시 토스트 알림
+ * - Realtime(INSERT) + fallback polling(새 이벤트 조회) 둘 다 사용
  */
 export default function AdminGate() {
   const navigate = useNavigate();
@@ -24,6 +24,10 @@ export default function AdminGate() {
 
   // 중복/스팸 방지: 같은 session_id에서 짧은 시간 연속 이벤트 무시
   const lastBySessionRef = useRef(new Map()); // session_id -> lastTime(ms)
+
+  // ✅ 폴링용 마지막 확인 시각(서버 created_at 기준으로 업데이트)
+  const lastSeenIsoRef = useRef(new Date().toISOString());
+  const pollTimerRef = useRef(null);
 
   function showToast(row) {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -61,7 +65,23 @@ export default function AdminGate() {
     }, 6000);
   }
 
-  // ✅ 관리자 실시간 이탈 알림: focus_events INSERT 구독
+  // ✅ 공통: 스팸 방지 체크 후 토스트
+  function maybeToast(row) {
+    if (!row) return;
+
+    // 스팸 방지: 같은 session_id에서 2초 이내 연속 이벤트는 무시
+    const sid = row.session_id || "";
+    const now = Date.now();
+    if (sid) {
+      const last = lastBySessionRef.current.get(sid) || 0;
+      if (now - last < 2000) return;
+      lastBySessionRef.current.set(sid, now);
+    }
+
+    showToast(row);
+  }
+
+  // ✅ 1) Realtime 구독
   useEffect(() => {
     const channel = supabase
       .channel("focus-events-live-admin")
@@ -72,19 +92,22 @@ export default function AdminGate() {
           const row = payload?.new;
           if (!row) return;
 
-          // 스팸 방지: 같은 session_id에서 2초 이내 연속 이벤트는 무시
-          const sid = row.session_id || "";
-          const now = Date.now();
-          if (sid) {
-            const last = lastBySessionRef.current.get(sid) || 0;
-            if (now - last < 2000) return;
-            lastBySessionRef.current.set(sid, now);
+          // 디버그 로그(원하면 나중에 제거)
+          console.log("[AdminGate] realtime focus_events INSERT:", row);
+
+          // 폴링 lastSeen도 같이 갱신 (중복 방지)
+          if (row.created_at) {
+            const cur = lastSeenIsoRef.current;
+            if (!cur || row.created_at > cur) lastSeenIsoRef.current = row.created_at;
           }
 
-          showToast(row);
+          maybeToast(row);
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        // 디버그: 구독 상태 확인
+        console.log("[AdminGate] realtime subscribe status:", status);
+      });
 
     return () => {
       try {
@@ -92,6 +115,55 @@ export default function AdminGate() {
       } catch {
         // ignore
       }
+    };
+  }, []);
+
+  // ✅ 2) Fallback Polling (Realtime이 안 와도 토스트 뜨게)
+  useEffect(() => {
+    async function pollNew() {
+      try {
+        // 마지막 본 시각 이후 새 이벤트만
+        const afterIso = lastSeenIsoRef.current || new Date(Date.now() - 10_000).toISOString();
+
+        const { data, error } = await supabase
+          .from("focus_events")
+          .select("id, created_at, session_id, student_name, event_type, detail")
+          .gt("created_at", afterIso)
+          .order("created_at", { ascending: true })
+          .limit(20);
+
+        if (error) {
+          // 폴링 에러는 조용히(너무 시끄러우면 콘솔만)
+          console.warn("[AdminGate] polling error:", error);
+          return;
+        }
+
+        const rows = data || [];
+        if (rows.length === 0) return;
+
+        // lastSeen 갱신 (가장 마지막 created_at)
+        const last = rows[rows.length - 1];
+        if (last?.created_at) lastSeenIsoRef.current = last.created_at;
+
+        // 새 이벤트들 토스트(스팸방지 통과한 것만)
+        for (const r of rows) {
+          console.log("[AdminGate] polling new row:", r);
+          maybeToast(r);
+        }
+      } catch (e) {
+        console.warn("[AdminGate] polling exception:", e);
+      }
+    }
+
+    // 3초마다 확인 (원하면 5초로 늘려도 됨)
+    pollTimerRef.current = setInterval(pollNew, 3000);
+
+    // 최초 1회 즉시 실행(관리자 페이지 켜자마자)
+    pollNew();
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
     };
   }, []);
 
@@ -108,7 +180,7 @@ export default function AdminGate() {
     <>
       <Outlet />
 
-      {/* ✅ 전역 토스트 (어느 관리자 페이지에 있든 뜸) */}
+      {/* ✅ 전역 토스트 */}
       {toast && (
         <div
           style={{
@@ -162,12 +234,10 @@ export default function AdminGate() {
           <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               onClick={() => {
-                // ✅ 토스트 → 해당 세션 검수페이지로 이동
                 if (sessionId) {
                   navigate(`/teacher/review/${sessionId}`, { replace: false });
                   return;
                 }
-                // 세션ID가 없다면 fallback: 집중 모니터로
                 navigate("/teacher/focus", { replace: false });
               }}
               style={{
@@ -218,7 +288,7 @@ export default function AdminGate() {
             </button>
           </div>
 
-          {/* (선택) detail 미리보기 */}
+          {/* detail 미리보기 */}
           {toast?.row?.detail && (
             <div
               style={{

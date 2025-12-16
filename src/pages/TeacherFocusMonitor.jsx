@@ -30,25 +30,42 @@ export default function TeacherFocusMonitor() {
     return { start, end };
   }, [filterMode]);
 
+  // ✅ 세션 메타 캐시 (id -> session row)
+  const sessionCacheRef = useRef(new Map());
+
+  async function fetchSessionsByIds(ids) {
+    const uniq = Array.from(new Set((ids || []).filter(Boolean)));
+    if (uniq.length === 0) return new Map();
+
+    // 캐시에 없는 것만 추가로 가져오기
+    const need = uniq.filter((id) => !sessionCacheRef.current.has(id));
+    if (need.length === 0) return sessionCacheRef.current;
+
+    const { data, error } = await supabase
+      .from("test_sessions")
+      .select("id, student_name, teacher_name, book, chapters_text, status")
+      .in("id", need);
+
+    if (error) {
+      console.error("[focus monitor] sessions fetch error", error);
+      return sessionCacheRef.current;
+    }
+
+    (data || []).forEach((s) => {
+      sessionCacheRef.current.set(s.id, s);
+    });
+
+    return sessionCacheRef.current;
+  }
+
   const fetchLogs = async () => {
     setLoading(true);
 
-    // ✅ 변경점:
-    // 기존: exam_focus_logs
-    // 신규: focus_events (학생 시험 페이지에서 INSERT하는 테이블)
-    //
-    // focus_events 컬럼:
-    // id, created_at, session_id, student_id, student_name, teacher_name, event_type, detail(jsonb)
-    //
-    // 세션 정보는 test_sessions로 조인해서 book/range 등 표시
+    // ✅ 핵심 수정: PostgREST embed(join) 제거
+    // focus_events 자체를 먼저 가져온 뒤, session_id들로 test_sessions를 따로 조회해서 붙인다.
     let query = supabase
       .from("focus_events")
-      .select(
-        `
-        id, created_at, event_type, detail,
-        session:test_sessions(id, student_name, teacher_name, book, chapters_text, status)
-      `
-      )
+      .select("id, created_at, session_id, student_id, student_name, teacher_name, event_type, detail")
       .order("created_at", { ascending: false })
       .limit(500);
 
@@ -71,18 +88,37 @@ export default function TeacherFocusMonitor() {
       return;
     }
 
-    const rows = data || [];
+    const rows = (data || []).map((r) => ({
+      ...r,
+      // 나중에 session 메타 붙일 자리
+      session: null,
+    }));
+
+    // 세션 메타 붙이기
+    const sessionIds = rows.map((r) => r.session_id).filter(Boolean);
+    await fetchSessionsByIds(sessionIds);
+
+    const enriched = rows.map((r) => {
+      const s = r.session_id ? sessionCacheRef.current.get(r.session_id) : null;
+      return { ...r, session: s || null };
+    });
 
     // 프론트 필터(검색): 학생명 / 책 / 범위 / 세션ID / 이벤트타입
     const qq = (q || "").trim().toLowerCase();
     const filtered = !qq
-      ? rows
-      : rows.filter((r) => {
-          const student = (r?.session?.student_name || r?.detail?.student_name || r?.student_name || "").toLowerCase();
+      ? enriched
+      : enriched.filter((r) => {
+          const student =
+            (r?.session?.student_name ||
+              r?.detail?.student_name ||
+              r?.student_name ||
+              "").toLowerCase();
+
           const book = (r?.session?.book || r?.detail?.book || "").toLowerCase();
-          const range = (r?.session?.chapters_text || "").toLowerCase();
+          const range = (r?.session?.chapters_text || r?.detail?.chapters_text || "").toLowerCase();
           const sid = (r?.session?.id || r?.session_id || "").toString().toLowerCase();
           const et = (r?.event_type || "").toLowerCase();
+
           return (
             student.includes(qq) ||
             book.includes(qq) ||
@@ -101,7 +137,7 @@ export default function TeacherFocusMonitor() {
 
     // ✅ 실시간 구독: focus_events INSERT
     const channel = supabase
-      .channel("focus_monitor_v2")
+      .channel("focus_monitor_v3")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "focus_events" },
@@ -111,14 +147,16 @@ export default function TeacherFocusMonitor() {
 
           // 필터에 맞는 경우만 반영 (대략적인 필터)
           if (filterMode === "session" && sessionFilter && row.session_id !== sessionFilter) return;
+
           if (filterMode === "today" && timeRange) {
             const ts = new Date(row.created_at).toISOString();
             if (ts < timeRange.start || ts > timeRange.end) return;
           }
+
           if (eventType !== "all" && row.event_type !== eventType) return;
 
-          // 참조 조인(test_sessions)이 필요해서 즉시 row push는 위험
-          // → 짧게 스로틀해서 재조회
+          // ✅ 조인 대신: session_id 메타만 미리 캐시에 확보하고 재조회
+          // (가장 안전: 화면/검색/그룹핑 일관성을 위해 fetchLogs로 통일)
           if (refetchTimer.current) clearTimeout(refetchTimer.current);
           refetchTimer.current = setTimeout(() => {
             fetchLogs();
@@ -149,7 +187,6 @@ export default function TeacherFocusMonitor() {
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(row);
     }
-    // rows는 already created_at desc라 그룹 내도 대체로 desc
     return map;
   }, [logs]);
 
@@ -175,6 +212,7 @@ export default function TeacherFocusMonitor() {
     if (t === "hidden") return "탭/앱 전환(hidden)";
     if (t === "blur") return "화면 이탈(blur)";
     if (t === "pagehide") return "페이지 종료/전환(pagehide)";
+    if (t === "beforeunload") return "페이지 이탈(beforeunload)";
     return t;
   };
 
@@ -211,6 +249,7 @@ export default function TeacherFocusMonitor() {
             <option value="hidden">hidden (탭/앱 전환)</option>
             <option value="blur">blur (화면 이탈)</option>
             <option value="pagehide">pagehide (페이지 종료/전환)</option>
+            <option value="beforeunload">beforeunload (페이지 이탈)</option>
           </select>
 
           <input
@@ -234,9 +273,9 @@ export default function TeacherFocusMonitor() {
             const isOpen = openKeys.has(key);
 
             const session = rows[0]?.session;
-            const teacherName = session?.teacher_name || rows[0]?.detail?.teacher_name || "-";
+            const teacherName = session?.teacher_name || rows[0]?.teacher_name || rows[0]?.detail?.teacher_name || "-";
             const book = session?.book || rows[0]?.detail?.book || "-";
-            const range = session?.chapters_text || "-";
+            const range = session?.chapters_text || rows[0]?.detail?.chapters_text || "-";
             const status = session?.status || "-";
 
             return (
@@ -261,7 +300,6 @@ export default function TeacherFocusMonitor() {
                       onClick={() => {
                         setFilterMode("session");
                         setSessionFilter(sid);
-                        // 펼치기
                         setOpenKeys((prev) => {
                           const next = new Set(prev);
                           next.add(key);
@@ -314,13 +352,16 @@ export default function TeacherFocusMonitor() {
                       </tbody>
                     </table>
 
-                    {/* detail 원문 보기(선택) */}
                     <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button
                         style={btn(false)}
                         onClick={() => {
                           try {
-                            const text = JSON.stringify(rows.map((r) => ({ id: r.id, created_at: r.created_at, event_type: r.event_type, detail: r.detail })), null, 2);
+                            const text = JSON.stringify(
+                              rows.map((r) => ({ id: r.id, created_at: r.created_at, event_type: r.event_type, detail: r.detail })),
+                              null,
+                              2
+                            );
                             navigator.clipboard.writeText(text);
                             alert("이 세션 로그(JSON) 복사 완료");
                           } catch {
