@@ -81,7 +81,10 @@ export default function OfficialResultList() {
   if (!who.id && !who.name) {
     return (
       <StudentShell>
-        <div className="vh-100 centered with-safe" style={{ width: "100%", color: "#000" }}>
+        <div
+          className="vh-100 centered with-safe"
+          style={{ width: "100%", color: "#000" }}
+        >
           <div className="student-container">
             <div className="student-card stack">
               <div className="student-text" style={{ color: "#333" }}>
@@ -93,7 +96,9 @@ export default function OfficialResultList() {
                 </button>
               </div>
               <div style={{ marginTop: 8 }}>
-                <Link to="/" style={{ color: "#4361ee" }}>← 홈으로</Link>
+                <Link to="/" style={{ color: "#4361ee" }}>
+                  ← 홈으로
+                </Link>
               </div>
             </div>
           </div>
@@ -132,10 +137,12 @@ export default function OfficialResultList() {
                   const range = r.chapters_text || `${r.chapter_start ?? "?"}-${r.chapter_end ?? "?"}`;
                   const wrong = Math.max(0, (r.num_questions ?? 0) - (r.final_score ?? 0));
                   const dateStr = dayjs(r.teacher_confirmed_at || r.created_at).format("YYYY.MM.DD");
+
                   return (
                     <li key={r.id} style={{ margin: "8px 0" }}>
                       <Link
-                        to={`/exam/official/result/${r.id}`}
+                        // ✅ 여기만 수정: results(복수) 라우트로 이동해야 함
+                        to={`/exam/official/results/${r.id}`}
                         style={{ color: "#1f365e", textDecoration: "none" }}
                       >
                         {dateStr} · {r.book} / {range} · {r.num_questions}문제 / -{wrong}
@@ -148,7 +155,9 @@ export default function OfficialResultList() {
             )}
 
             <div style={{ marginTop: 12 }}>
-              <Link to="/dashboard" style={{ color: "#4361ee" }}>← 대시보드</Link>
+              <Link to="/dashboard" style={{ color: "#4361ee" }}>
+                ← 대시보드
+              </Link>
             </div>
           </div>
         </div>

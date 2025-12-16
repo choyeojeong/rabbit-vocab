@@ -1,5 +1,5 @@
 // src/App.jsx
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -29,7 +29,7 @@ import TeacherFocusMonitor from "./pages/TeacherFocusMonitor";
 import CsvManagePage from "./pages/admin/CsvManagePage";
 import CsvBatchListPage from "./pages/admin/CsvBatchListPage";
 
-// ✅ 관리자 게이트 (전역 토스트 + Realtime)
+// ✅ 관리자 게이트
 import AdminGate from "./pages/admin/AdminGate";
 
 // 학생 보호
@@ -104,6 +104,14 @@ function ProtectedDashboard({ children }) {
 }
 
 /* =========================
+   ✅ 구버전 단수 경로(/result/:id) → /results/:id 로 정확히 치환 리다이렉트
+========================= */
+function LegacyOfficialResultRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/exam/official/results/${id}`} replace />;
+}
+
+/* =========================
    App Router
 ========================= */
 export default function App() {
@@ -112,9 +120,10 @@ export default function App() {
       <Routes>
         {/* 공개 */}
         <Route path="/" element={<LoginPage />} />
+        <Route path="/login" element={<LoginPage />} /> {/* ✅ alias */}
         <Route path="/register" element={<RegisterPage />} />
 
-        {/* 대시보드 (공용) */}
+        {/* 대시보드 */}
         <Route
           path="/dashboard"
           element={
@@ -165,6 +174,7 @@ export default function App() {
             </Protected>
           }
         />
+
         <Route
           path="/exam/official/results"
           element={
@@ -182,7 +192,13 @@ export default function App() {
           }
         />
 
-        {/* 관리자 / 교사 (AdminGate 내부) */}
+        {/* ✅ 구버전 단수 경로도 안전하게 살려두기 */}
+        <Route
+          path="/exam/official/result/:id"
+          element={<LegacyOfficialResultRedirect />}
+        />
+
+        {/* 관리자 / 교사 */}
         <Route element={<AdminGate />}>
           <Route path="/teacher/manage" element={<TeacherManagePage />} />
           <Route path="/teacher/review" element={<TeacherReviewList />} />
@@ -190,11 +206,9 @@ export default function App() {
           <Route path="/teacher/today" element={<TeacherToday />} />
           <Route path="/teacher/focus" element={<TeacherFocusMonitor />} />
 
-          {/* ✅ CSV (teacher 경로도 유지하는 게 안전) */}
           <Route path="/teacher/csv" element={<CsvManagePage />} />
           <Route path="/teacher/csv/batches" element={<CsvBatchListPage />} />
 
-          {/* 관리자 alias */}
           <Route path="/admin/users" element={<TeacherManagePage />} />
           <Route path="/admin/csv" element={<CsvManagePage />} />
           <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
