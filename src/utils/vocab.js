@@ -35,14 +35,51 @@ export function parseAccepted(str) {
     .filter(Boolean);
 }
 
-/** 책 목록(중복 제거) */
+/* =========================
+   ✅ PostgREST 기본 row limit 회피용: 페이지네이션 fetch helper
+   - supabase-js v2에서 .range(from, to) 사용
+========================= */
+async function fetchAllPages(buildQuery, pageSize = 1000) {
+  const out = [];
+  let from = 0;
+
+  // 무한루프 방지용 (필요시 조정)
+  const MAX_PAGES = 200;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const to = from + pageSize - 1;
+
+    const q = buildQuery().range(from, to);
+    const { data, error } = await q;
+    if (error) throw error;
+
+    const chunk = data || [];
+    out.push(...chunk);
+
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return out;
+}
+
+/** 책 목록(중복 제거) - ✅ row limit 안전 */
 export async function fetchBooks() {
-  const { data, error } = await supabase
-    .from('vocab_words')
-    .select('book')
-    .order('book', { ascending: true });
-  if (error) throw error;
-  const uniq = Array.from(new Set((data || []).map((d) => d.book).filter(Boolean)));
+  const rows = await fetchAllPages(
+    () =>
+      supabase
+        .from('vocab_words')
+        .select('book')
+        .order('book', { ascending: true }),
+    1000
+  );
+
+  const uniq = Array.from(
+    new Set((rows || []).map((d) => d.book).filter(Boolean))
+  );
+
+  // 혹시 정렬이 깨져 들어올 수 있어 한 번 더 정렬
+  uniq.sort((a, b) => String(a).localeCompare(String(b), 'ko'));
   return uniq;
 }
 
@@ -50,13 +87,11 @@ export async function fetchBooks() {
 export async function fetchChapters(book) {
   if (!book) return [];
 
-  const { data, error } = await supabase
-    .rpc('get_book_chapters', { p_book: book });
-
+  const { data, error } = await supabase.rpc('get_book_chapters', { p_book: book });
   if (error) throw error;
 
   return (data || [])
-    .map(d => Number(d.chapter))
+    .map((d) => Number(d.chapter))
     .filter(Number.isFinite);
 }
 
@@ -67,14 +102,21 @@ export async function fetchWordsInRange(book, start, end) {
   if (!Number.isFinite(s) || !Number.isFinite(e) || !book) return [];
   if (s > e) [s, e] = [e, s];
 
-  const { data, error } = await supabase
-    .from('vocab_words')
-    .select('id, term_en, meaning_ko, pos, accepted_ko, chapter')
-    .eq('book', book)
-    .gte('chapter', s)
-    .lte('chapter', e);
-  if (error) throw error;
-  return data || [];
+  // 보통 range는 크지 않지만, 그래도 안전하게 페이지네이션 적용
+  const rows = await fetchAllPages(
+    () =>
+      supabase
+        .from('vocab_words')
+        .select('id, term_en, meaning_ko, pos, accepted_ko, chapter')
+        .eq('book', book)
+        .gte('chapter', s)
+        .lte('chapter', e)
+        .order('chapter', { ascending: true })
+        .order('term_en', { ascending: true }),
+    1000
+  );
+
+  return rows || [];
 }
 
 /** 챕터 입력 파싱: "1-4, 7, 10" → [1,2,3,4,7,10] (항상 number[]) */
@@ -109,15 +151,22 @@ export function parseChapterInput(input) {
   return [...out].sort((a, b) => a - b);
 }
 
-/** 특정 책의 모든 단어(보기 후보용 풀) */
+/** 특정 책의 모든 단어(보기 후보용 풀) - ✅ row limit 안전 */
 export async function fetchWordsInBook(book) {
   if (!book) return [];
-  const { data, error } = await supabase
-    .from('vocab_words')
-    .select('id, term_en, meaning_ko, pos, accepted_ko, chapter')
-    .eq('book', book);
-  if (error) throw error;
-  return data || [];
+
+  const rows = await fetchAllPages(
+    () =>
+      supabase
+        .from('vocab_words')
+        .select('id, term_en, meaning_ko, pos, accepted_ko, chapter')
+        .eq('book', book)
+        .order('chapter', { ascending: true })
+        .order('term_en', { ascending: true }),
+    1000
+  );
+
+  return rows || [];
 }
 
 /** 특정 책에서 여러 챕터에 해당하는 단어들 불러오기 (chapters 어떤 형태든 OK) */
@@ -128,13 +177,20 @@ export async function fetchWordsByChapters(book, chapters = []) {
     .filter((x) => Number.isFinite(x));
   if (list.length === 0) return [];
 
-  const { data, error } = await supabase
-    .from('vocab_words')
-    .select('id, term_en, meaning_ko, pos, accepted_ko, chapter')
-    .eq('book', book)
-    .in('chapter', list);
-  if (error) throw error;
-  return data || [];
+  // IN 쿼리는 보통 결과가 작지만, 혹시 많을 수 있어 안전하게 페이지네이션
+  const rows = await fetchAllPages(
+    () =>
+      supabase
+        .from('vocab_words')
+        .select('id, term_en, meaning_ko, pos, accepted_ko, chapter')
+        .eq('book', book)
+        .in('chapter', list)
+        .order('chapter', { ascending: true })
+        .order('term_en', { ascending: true }),
+    1000
+  );
+
+  return rows || [];
 }
 
 /** 같은 책/같은 품사에서 오답 2개 뽑기 (부족하면 범위 → 책 전체로 보완) */
@@ -167,7 +223,9 @@ export function buildMCQOptions(current, pool = [], rangePool = []) {
   }
 
   const wrongs = sampleN(
-    Array.from(new Set(candidates.map((x) => x.meaning_ko))).filter((m) => m && m !== correct),
+    Array.from(new Set(candidates.map((x) => x.meaning_ko))).filter(
+      (m) => m && m !== correct
+    ),
     2
   );
 
