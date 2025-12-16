@@ -6,9 +6,48 @@ import { supabase } from "../../utils/supabaseClient";
  * AdminGate
  * - 로그인에서 role=admin 인 경우만 통과
  * - prompt / 비밀번호 입력 없음
- * - 관리자 어느 페이지에 있든 "이탈 감지" 발생 시 토스트 알림
+ * - 관리자 어느 페이지에 있든 "이탈 감지" 발생 시 토스트 + (옵션) 알림 소리
  * - Realtime(INSERT) + fallback polling(새 이벤트 조회) 둘 다 사용
+ *
+ * ✅ 개선
+ * 1) polling lastSeen 초기값을 "지금"이 아니라 "최근 30초"로 → 진입 직후 이벤트 놓침 방지
+ * 2) 전역 '소리 켜기(한번)' 버튼 추가 (브라우저 오디오 정책 unlock)
+ * 3) 토스트 뜰 때 soundEnabled면 딩 소리 재생
  */
+
+// --- WebAudio 딩 사운드 (짧게) ---
+function playDing() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.55);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.6);
+
+    osc.onended = () => {
+      try {
+        ctx.close();
+      } catch {}
+    };
+  } catch {
+    // ignore
+  }
+}
+
 export default function AdminGate() {
   const navigate = useNavigate();
   const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
@@ -22,11 +61,23 @@ export default function AdminGate() {
   const [toast, setToast] = useState(null); // { id, title, msg, row }
   const toastTimerRef = useRef(null);
 
+  // ✅ 소리 on/off (세션 유지)
+  const [soundEnabled, setSoundEnabled] = useState(
+    sessionStorage.getItem("admin_sound_enabled") === "1"
+  );
+
+  // ✅ 오디오 unlock(클릭 1번 필요) 상태
+  const [audioUnlocked, setAudioUnlocked] = useState(
+    sessionStorage.getItem("admin_audio_unlocked") === "1"
+  );
+
   // 중복/스팸 방지: 같은 session_id에서 짧은 시간 연속 이벤트 무시
   const lastBySessionRef = useRef(new Map()); // session_id -> lastTime(ms)
 
-  // ✅ 폴링용 마지막 확인 시각(서버 created_at 기준으로 업데이트)
-  const lastSeenIsoRef = useRef(new Date().toISOString());
+  // ✅ 폴링용 마지막 확인 시각
+  // 기존: new Date().toISOString() → 진입 직후 이벤트 놓칠 수 있음
+  // 변경: 최근 30초부터 시작 → "페이지 들어오고 바로 발생한" 이벤트도 잡음
+  const lastSeenIsoRef = useRef(new Date(Date.now() - 30_000).toISOString());
   const pollTimerRef = useRef(null);
 
   function showToast(row) {
@@ -57,6 +108,11 @@ export default function AdminGate() {
       msg: `${typeLabel}${when ? ` · ${when}` : ""}`,
       row,
     });
+
+    // ✅ 소리
+    if (soundEnabled && audioUnlocked) {
+      playDing();
+    }
 
     // 6초 후 자동 닫힘
     toastTimerRef.current = setTimeout(() => {
@@ -123,7 +179,8 @@ export default function AdminGate() {
     async function pollNew() {
       try {
         // 마지막 본 시각 이후 새 이벤트만
-        const afterIso = lastSeenIsoRef.current || new Date(Date.now() - 10_000).toISOString();
+        const afterIso =
+          lastSeenIsoRef.current || new Date(Date.now() - 10_000).toISOString();
 
         const { data, error } = await supabase
           .from("focus_events")
@@ -133,7 +190,6 @@ export default function AdminGate() {
           .limit(20);
 
         if (error) {
-          // 폴링 에러는 조용히(너무 시끄러우면 콘솔만)
           console.warn("[AdminGate] polling error:", error);
           return;
         }
@@ -155,10 +211,10 @@ export default function AdminGate() {
       }
     }
 
-    // 3초마다 확인 (원하면 5초로 늘려도 됨)
+    // 3초마다 확인
     pollTimerRef.current = setInterval(pollNew, 3000);
 
-    // 최초 1회 즉시 실행(관리자 페이지 켜자마자)
+    // 최초 1회 즉시 실행
     pollNew();
 
     return () => {
@@ -176,8 +232,100 @@ export default function AdminGate() {
 
   const sessionId = toast?.row?.session_id || null;
 
+  // ✅ 오디오 unlock 버튼 (한번 클릭 필요)
+  async function unlockAudioOnce() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) {
+        alert("이 브라우저는 오디오 알림을 지원하지 않아요.");
+        return;
+      }
+      const ctx = new AudioCtx();
+      // iOS/Chrome 정책: resume 필요
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+      // 짧게 무음 재생(언락 목적)
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.02);
+      osc.onended = () => {
+        try {
+          ctx.close();
+        } catch {}
+      };
+
+      setAudioUnlocked(true);
+      sessionStorage.setItem("admin_audio_unlocked", "1");
+      // 테스트 딩
+      playDing();
+      alert("소리 켜짐(한번) 완료! 이제 알림 소리가 납니다.");
+    } catch (e) {
+      console.warn("[AdminGate] unlock audio failed:", e);
+      alert("소리 켜기 실패. 다시 한 번 눌러주세요.");
+    }
+  }
+
   return (
     <>
+      {/* ✅ 전역 상단 작은 컨트롤(어느 관리자 페이지든) */}
+      <div
+        style={{
+          position: "fixed",
+          top: 10,
+          right: 12,
+          zIndex: 99998,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          onClick={unlockAudioOnce}
+          style={{
+            height: 34,
+            padding: "0 12px",
+            borderRadius: 999,
+            border: "1px solid #ffd3e3",
+            background: "#fff",
+            fontWeight: 900,
+            cursor: "pointer",
+            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+          }}
+          title="브라우저 정책 때문에 알림 소리는 한 번 클릭으로 활성화가 필요해요."
+        >
+          {audioUnlocked ? "🔊 소리 켜짐" : "🔊 소리 켜기(한번)"}
+        </button>
+
+        <button
+          onClick={() => {
+            const next = !soundEnabled;
+            setSoundEnabled(next);
+            sessionStorage.setItem("admin_sound_enabled", next ? "1" : "0");
+            if (next && audioUnlocked) playDing();
+          }}
+          style={{
+            height: 34,
+            padding: "0 12px",
+            borderRadius: 999,
+            border: "none",
+            background: soundEnabled ? "#ff6fa3" : "#f0f0f0",
+            color: soundEnabled ? "#fff" : "#444",
+            fontWeight: 900,
+            cursor: "pointer",
+            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+          }}
+          title="알림 소리 on/off"
+        >
+          {soundEnabled ? "🔔 켜짐" : "🔕 꺼짐"}
+        </button>
+      </div>
+
       <Outlet />
 
       {/* ✅ 전역 토스트 */}
