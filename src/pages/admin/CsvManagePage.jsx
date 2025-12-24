@@ -7,7 +7,11 @@ import { supabase } from "../../utils/supabaseClient";
  * CSV Manage Page
  * - 파일 업로드 → 파싱 → /api/csv-prepare 소배치 호출 → 미리보기
  * - "Supabase 등록" 누르면 vocab_words 다 넣은 뒤에 word_batches 한 줄만 기록
- * - 이번 버전: word_batches 기록 뒤에 변환된 CSV도 storage(csv_uploads/{batch.id}.csv)에 저장
+ * - 이번 버전:
+ *   1) vocab_words는 upsert + ignoreDuplicates (중복 충돌로 전체 실패 방지)
+ *   2) 파일 내부 중복은 사전에 dedupe(스킵 카운트 표시)
+ *   3) DB 중복으로 인해 upsert에서 무시된 건수도 추정(= inserted rows 길이로 계산)해서 표시
+ *   4) word_batches 기록 뒤에 변환된 CSV도 storage(csv_uploads/{batch.id}.csv)에 저장
  */
 export default function CsvManagePage() {
   const fileRef = useRef(null);
@@ -27,6 +31,10 @@ export default function CsvManagePage() {
   const [stats, setStats] = useState(null);
   const [rows, setRows] = useState([]);
   const [errorMsg, setErrorMsg] = useState("");
+
+  // ✅ 등록 결과(중복 스킵 등) 표시
+  const [registerReport, setRegisterReport] = useState(null);
+  // { attemptedUnique, inserted, skippedFileDup, skippedDbDup, batchId }
 
   // 쿼리스트링 읽어서 기본값 세팅
   useEffect(() => {
@@ -52,6 +60,64 @@ export default function CsvManagePage() {
     const n = Number(val);
     if (Number.isNaN(n)) return null;
     return n;
+  }
+
+  // ✅ 키 정규화 (중복 판별용)
+  function normTerm(v) {
+    return (v ?? "").toString().trim().toLowerCase();
+  }
+  function normBook(v) {
+    return (v ?? "").toString().trim();
+  }
+  function makeKey(book, chapter, term) {
+    const b = normBook(book);
+    const ch = toSafeChapter(chapter);
+    const t = normTerm(term);
+    return `${b}__${ch ?? "null"}__${t}`;
+  }
+
+  // ✅ 파일 내부 중복 제거 + (가능하면) 정보 보강 병합
+  // - 같은 key가 여러 번 나오면:
+  //   1) meaning_ko/pos/accepted_ko가 비어있으면 뒤의 값으로 채우기
+  //   2) accepted_ko는 콤마로 합치기(중복 제거)
+  function dedupeRowsWithMerge(inputRows) {
+    const map = new Map();
+    let dupCount = 0;
+
+    const splitAccepted = (s) =>
+      (s ?? "")
+        .toString()
+        .split(/[,\|;]/g)
+        .map((x) => x.trim())
+        .filter(Boolean);
+
+    for (const r of inputRows) {
+      const key = makeKey(r.book, r.chapter, r.term_en);
+      if (!key) continue;
+
+      if (!map.has(key)) {
+        map.set(key, { ...r });
+      } else {
+        dupCount += 1;
+        const cur = map.get(key);
+
+        // 빈 값이면 보강
+        if (!String(cur.meaning_ko ?? "").trim() && String(r.meaning_ko ?? "").trim()) {
+          cur.meaning_ko = r.meaning_ko;
+        }
+        if (!String(cur.pos ?? "").trim() && String(r.pos ?? "").trim()) {
+          cur.pos = r.pos;
+        }
+
+        // accepted_ko는 합치기
+        const a = new Set([...splitAccepted(cur.accepted_ko), ...splitAccepted(r.accepted_ko)]);
+        cur.accepted_ko = Array.from(a).join(", ");
+
+        map.set(key, cur);
+      }
+    }
+
+    return { deduped: Array.from(map.values()), dupCount };
   }
 
   /** CSV 파일을 표준 행 구조로 파싱 */
@@ -191,6 +257,7 @@ export default function CsvManagePage() {
     setResultCsv("");
     setRows([]);
     setProgress(0);
+    setRegisterReport(null);
     setBusy(true);
 
     try {
@@ -288,54 +355,96 @@ export default function CsvManagePage() {
   }
 
   /**
-   * 1) vocab_words 전부 insert
+   * 1) vocab_words upsert(ignoreDuplicates)로 등록
+   *    - 파일 내부 중복은 사전에 dedupe하여 스킵(카운트 표시)
+   *    - DB에 이미 있는 동일 키는 upsert(ignoreDuplicates)로 자동 스킵(카운트 표시)
    * 2) 성공하면 word_batches 한 줄 기록
    * 3) 그리고 변환된 CSV를 storage(csv_uploads/{batch.id}.csv)에 업로드
    */
   async function registerToSupabase() {
     setErrorMsg("");
+    setRegisterReport(null);
+
     if (!resultCsv || rows.length === 0) {
       setErrorMsg("먼저 CSV를 업로드하여 변환/보정을 완료해 주세요.");
       return;
     }
 
     setBusy(true);
+    setProgress(0);
+
     try {
       const CHUNK = 500;
 
-      // 1) vocab_words 먼저
-      for (let i = 0; i < rows.length; i += CHUNK) {
-        const chunk = rows.slice(i, i + CHUNK).map((r) => {
-          const safeBook = (r.book ?? stats?.book ?? bookOverride ?? "unknown")
-            .toString()
-            .trim();
+      // ✅ 최종 저장될 book명(선택값 우선)
+      const finalBook = (bookOverride || stats?.book || "unknown").toString().trim();
 
-          const rawChapter = r.chapter ?? r.index ?? "";
-          const pos = (r.pos ?? "").toString().trim() || "기타";
-          const accepted_ko = (r.accepted_ko ?? "").toString().trim() || null;
+      // ✅ 등록용 정규화 rows 만들기
+      const normalized = rows.map((r) => {
+        const rawChapter = r.chapter ?? r.index ?? "";
+        const pos = (r.pos ?? "").toString().trim() || "기타";
+        const accepted_ko = (r.accepted_ko ?? "").toString().trim() || null;
 
-          return {
-            book: safeBook,
-            chapter: toSafeChapter(rawChapter),
-            term_en: (r.term_en ?? "").toString().trim(),
-            meaning_ko: (r.meaning_ko ?? "").toString().trim(),
-            pos,
-            accepted_ko,
-          };
-        });
+        return {
+          book: finalBook, // ✅ bookOverride/선택 book으로 강제 통일
+          chapter: toSafeChapter(rawChapter),
+          term_en: (r.term_en ?? "").toString().trim(),
+          meaning_ko: (r.meaning_ko ?? "").toString().trim(),
+          pos,
+          accepted_ko,
+        };
+      });
 
-        const { error: e2 } = await supabase.from("vocab_words").insert(chunk);
+      // ✅ 파일 내부 중복 제거(병합) + 카운트
+      const { deduped, dupCount: skippedFileDup } = dedupeRowsWithMerge(normalized);
+
+      // ✅ DB upsert(ignoreDuplicates)로 등록
+      // - chunk마다 inserted 개수를 받아서 "DB 중복으로 스킵된 수" 계산
+      let attemptedUnique = 0;
+      let inserted = 0;
+
+      for (let i = 0; i < deduped.length; i += CHUNK) {
+        const chunk = deduped.slice(i, i + CHUNK);
+
+        // key가 완전히 비어있는 행은 제외(안전)
+        const safeChunk = chunk.filter(
+          (r) =>
+            String(r.book ?? "").trim() &&
+            String(r.term_en ?? "").trim() &&
+            r.chapter !== null &&
+            r.chapter !== undefined
+        );
+
+        attemptedUnique += safeChunk.length;
+
+        // ✅ 핵심: upsert + ignoreDuplicates
+        const { data, error: e2 } = await supabase
+          .from("vocab_words")
+          .upsert(safeChunk, {
+            onConflict: "book,chapter,term_en",
+            ignoreDuplicates: true,
+          })
+          .select("id"); // ✅ inserted row 수 추정용
+
         if (e2) {
-          throw new Error(`[vocab_words.insert] ${e2.message}`);
+          throw new Error(`[vocab_words.upsert] ${e2.message}`);
         }
+
+        inserted += Array.isArray(data) ? data.length : 0;
+
+        // 진행률(등록 단계는 0~1로)
+        const done = Math.min(i + CHUNK, deduped.length);
+        setProgress(deduped.length > 0 ? done / deduped.length : 1);
       }
+
+      const skippedDbDup = Math.max(0, attemptedUnique - inserted);
 
       // 2) word_batches 기록
       const { data: batch, error: e1 } = await supabase
         .from("word_batches")
         .insert({
           filename: fileRef.current?.files?.[0]?.name || "(unknown filename)",
-          book: stats?.book || bookOverride || "unknown",
+          book: finalBook,
           chapter: linkedChapter ? toSafeChapter(linkedChapter) : 0,
           total_rows: rows.length,
         })
@@ -363,7 +472,6 @@ export default function CsvManagePage() {
           });
 
         if (uploadErr) {
-          // ✅ 여기서 바로 알려줘야 사용자가 버킷이 비어있는 이유를 앎
           alert(
             "CSV는 테이블에 저장됐지만 Storage 업로드는 실패했습니다.\n" +
               uploadErr.message +
@@ -372,13 +480,28 @@ export default function CsvManagePage() {
         }
       }
 
+      // ✅ UI 표시용 리포트 저장
+      setRegisterReport({
+        attemptedUnique,
+        inserted,
+        skippedFileDup,
+        skippedDbDup,
+        batchId: batch?.id || null,
+        book: finalBook,
+      });
+
       alert(
-        `등록 완료!\n배치ID: ${batch?.id}\n총 ${rows.length.toLocaleString()}건 등록`
+        `등록 완료!\n배치ID: ${batch?.id}\n` +
+          `유니크 기준 시도: ${attemptedUnique.toLocaleString()}건\n` +
+          `신규 등록: ${inserted.toLocaleString()}건\n` +
+          `중복 스킵(파일): ${skippedFileDup.toLocaleString()}건\n` +
+          `중복 스킵(DB): ${skippedDbDup.toLocaleString()}건`
       );
     } catch (e) {
       setErrorMsg(e.message || String(e));
     } finally {
       setBusy(false);
+      setProgress(0);
     }
   }
 
@@ -521,6 +644,38 @@ export default function CsvManagePage() {
               </div>
             </div>
           )}
+
+          {/* ✅ 등록 결과 리포트 (중복 스킵 N개) */}
+          {registerReport && (
+            <div style={styles.report}>
+              <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                ✅ 등록 결과 (중복 스킵 포함)
+              </div>
+              <div style={styles.reportGrid}>
+                <div>📘 book</div>
+                <div>{registerReport.book}</div>
+
+                <div>유니크 기준 시도</div>
+                <div>{registerReport.attemptedUnique.toLocaleString()}건</div>
+
+                <div>신규 등록</div>
+                <div>{registerReport.inserted.toLocaleString()}건</div>
+
+                <div>중복 스킵(파일 내부)</div>
+                <div>{registerReport.skippedFileDup.toLocaleString()}건</div>
+
+                <div>중복 스킵(DB 기존)</div>
+                <div>{registerReport.skippedDbDup.toLocaleString()}건</div>
+
+                <div>배치 ID</div>
+                <div>{registerReport.batchId || "-"}</div>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
+                ※ “파일 내부 중복”은 업로드 파일 안에서 (book+chapter+term_en)이 반복된 경우이고, <br />
+                “DB 기존 중복”은 이미 DB에 있던 동일 키가 upsert(ignoreDuplicates)로 자동 스킵된 경우입니다.
+              </div>
+            </div>
+          )}
         </div>
 
         {rows.length > 0 && (
@@ -632,6 +787,20 @@ const styles = {
     gap: 8,
     fontSize: 14,
     color: "#374151",
+  },
+  report: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+    background: "#ecfdf5",
+    border: "1px solid #bbf7d0",
+    color: "#065f46",
+  },
+  reportGrid: {
+    display: "grid",
+    gridTemplateColumns: "220px 1fr",
+    gap: 6,
+    fontSize: 14,
   },
   subhead: {
     display: "flex",
