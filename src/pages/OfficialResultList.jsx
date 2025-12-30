@@ -1,4 +1,3 @@
-// src/pages/OfficialResultList.jsx
 import { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
@@ -22,7 +21,7 @@ export default function OfficialResultList() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // ✅ 마운트 시 한 번 더 “실존 학생” 검증 (PWA 캐시로 오래된 세션 방지)
+  // ✅ 마운트 시 한 번 더 “실존 학생” 검증
   useEffect(() => {
     (async () => {
       const s = await ensureLiveStudent();
@@ -40,7 +39,6 @@ export default function OfficialResultList() {
       setLoading(true);
       setErr("");
 
-      // ✅ 공식시험 + 확정본만
       let q = supabase
         .from("test_sessions")
         .select(
@@ -48,7 +46,6 @@ export default function OfficialResultList() {
         )
         .eq("mode", "official")
         .eq("status", "finalized")
-        // ✅ id OR name 둘 다 허용 (id가 가장 신뢰도 높음)
         .or(
           [
             who.id ? `student_id.eq.${who.id}` : null,
@@ -77,14 +74,11 @@ export default function OfficialResultList() {
     fetchRows();
   }, [fetchRows]);
 
-  // 비로그인 상태: 로그인 유도
+  // 비로그인 상태
   if (!who.id && !who.name) {
     return (
       <StudentShell>
-        <div
-          className="vh-100 centered with-safe"
-          style={{ width: "100%", color: "#000" }}
-        >
+        <div className="vh-100 centered with-safe" style={{ width: "100%", color: "#000" }}>
           <div className="student-container">
             <div className="student-card stack">
               <div className="student-text" style={{ color: "#333" }}>
@@ -112,7 +106,7 @@ export default function OfficialResultList() {
       <div className="vh-100 centered with-safe" style={{ width: "100%", color: "#000" }}>
         <div className="student-container">
           <div className="student-card stack">
-            {/* 상단: 새로고침만 */}
+            {/* 상단: 새로고침 */}
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
                 onClick={fetchRows}
@@ -126,27 +120,64 @@ export default function OfficialResultList() {
 
             {err && <div style={{ marginTop: 8, color: "#d00" }}>{err}</div>}
 
-            {/* 결과 목록 */}
             {loading ? (
               <div style={{ marginTop: 10 }}>불러오는 중…</div>
             ) : rows.length === 0 ? (
               <div style={{ marginTop: 10, color: "#777" }}>확정된 결과가 없습니다.</div>
             ) : (
-              <ul style={{ paddingLeft: 18, marginTop: 10 }}>
+              <ul style={{ paddingLeft: 0, marginTop: 10, listStyle: "none" }}>
                 {rows.map((r) => {
-                  const range = r.chapters_text || `${r.chapter_start ?? "?"}-${r.chapter_end ?? "?"}`;
-                  const wrong = Math.max(0, (r.num_questions ?? 0) - (r.final_score ?? 0));
-                  const dateStr = dayjs(r.teacher_confirmed_at || r.created_at).format("YYYY.MM.DD");
+                  const range =
+                    r.chapters_text ||
+                    `${r.chapter_start ?? "?"}-${r.chapter_end ?? "?"}`;
+                  const wrong = Math.max(
+                    0,
+                    (r.num_questions ?? 0) - (r.final_score ?? 0)
+                  );
+                  const dateStr = dayjs(
+                    r.teacher_confirmed_at || r.created_at
+                  ).format("YYYY.MM.DD");
 
                   return (
-                    <li key={r.id} style={{ margin: "8px 0" }}>
+                    <li key={r.id} style={{ margin: "6px 0" }}>
                       <Link
-                        // ✅ 여기만 수정: results(복수) 라우트로 이동해야 함
                         to={`/exam/official/results/${r.id}`}
-                        style={{ color: "#1f365e", textDecoration: "none" }}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          color: "#1f365e",
+                          textDecoration: "none",
+                          cursor: "pointer",
+                          background: "#fff",
+                        }}
+                        onTouchStart={(e) => {
+                          e.currentTarget.style.background = "#f5f6fa";
+                        }}
+                        onTouchEnd={(e) => {
+                          e.currentTarget.style.background = "#fff";
+                        }}
                       >
-                        {dateStr} · {r.book} / {range} · {r.num_questions}문제 / -{wrong}
-                        {r.final_pass ? " · 통과" : " · 불통과"}
+                        <span style={{ fontSize: 14 }}>
+                          {dateStr} · {r.book} / {range} · {r.num_questions}문제 / -{wrong}
+                          {r.final_pass ? " · 통과" : " · 불통과"}
+                        </span>
+
+                        {/* ✅ 클릭 가능하다는 시각적 힌트 */}
+                        <span
+                          aria-hidden
+                          style={{
+                            fontSize: 18,
+                            fontWeight: 900,
+                            color: "#999",
+                            flexShrink: 0,
+                          }}
+                        >
+                          ›
+                        </span>
                       </Link>
                     </li>
                   );
