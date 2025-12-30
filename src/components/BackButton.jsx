@@ -1,14 +1,12 @@
 import { useNavigate } from "react-router-dom";
 
-export default function BackButton({ fallback = "/dashboard" }) {
+export default function BackButton({ fallback = "/dashboard", hide = false }) {
   const navigate = useNavigate();
+  if (hide) return null;
 
   function goBack() {
-    if (window.history.length > 1) {
-      navigate(-1);
-    } else {
-      navigate(fallback, { replace: true });
-    }
+    if (window.history.length > 1) navigate(-1);
+    else navigate(fallback, { replace: true });
   }
 
   return (
@@ -16,21 +14,36 @@ export default function BackButton({ fallback = "/dashboard" }) {
       type="button"
       onClick={goBack}
       style={{
-        position: "absolute",
-        top: 12,
+        position: "fixed",
+        top: 10,
         left: 12,
-        zIndex: 1000,
+        zIndex: 99998,
+        height: 34,
+        padding: "0 12px",
         borderRadius: 999,
-        border: "1px solid #eee",
+        border: "1px solid #e9e9e9",
         background: "#fff",
-        padding: "6px 10px",
+
+        // ✅ 핵심: 전역 color(흰색) 상속 방지
+        color: "#222",
+
+        fontWeight: 900,
         fontSize: 14,
+        lineHeight: "34px",
         cursor: "pointer",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        WebkitTextFillColor: "#222", // ✅ iOS/일부 브라우저에서 color 무시 방지
       }}
       aria-label="뒤로가기"
+      title="뒤로가기"
     >
-      ← 뒤로
+      <span aria-hidden="true" style={{ fontSize: 16, lineHeight: "16px" }}>
+        ←
+      </span>
+      <span>뒤로</span>
     </button>
   );
 }
