@@ -112,6 +112,25 @@ function LegacyOfficialResultRedirect() {
 }
 
 /* =========================
+   ✅ 로그인 유지용 리다이렉트
+   - 이미 role이 있으면 "/" 또는 "/login" 접근 시 /dashboard로 이동
+   - (LoginPage에도 동일 로직이 있지만, 여기서도 한 번 더 안전하게 막아줌)
+========================= */
+function LoginGate({ children }) {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
+    if (role) {
+      navigate("/dashboard", { replace: true });
+    }
+  }, [navigate]);
+
+  // role이 있으면 곧바로 replace될 것이고, 없으면 로그인 UI 그대로 렌더
+  return children;
+}
+
+/* =========================
    App Router
 ========================= */
 export default function App() {
@@ -119,8 +138,23 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         {/* 공개 */}
-        <Route path="/" element={<LoginPage />} />
-        <Route path="/login" element={<LoginPage />} /> {/* ✅ alias */}
+        <Route
+          path="/"
+          element={
+            <LoginGate>
+              <LoginPage />
+            </LoginGate>
+          }
+        />
+        <Route
+          path="/login"
+          element={
+            <LoginGate>
+              <LoginPage />
+            </LoginGate>
+          }
+        />{" "}
+        {/* ✅ alias */}
         <Route path="/register" element={<RegisterPage />} />
 
         {/* 대시보드 */}

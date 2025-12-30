@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Outlet, Navigate, useNavigate } from "react-router-dom";
+import { Outlet, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../../utils/supabaseClient";
 
 /**
@@ -13,6 +13,10 @@ import { supabase } from "../../utils/supabaseClient";
  * 1) polling lastSeen 초기값을 "지금"이 아니라 "최근 30초"로 → 진입 직후 이벤트 놓침 방지
  * 2) 전역 '소리 켜기(한번)' 버튼 추가 (브라우저 오디오 정책 unlock)
  * 3) 토스트 뜰 때 soundEnabled면 딩 소리 재생
+ *
+ * ✅ 추가
+ * - 왼쪽 상단 "← 뒤로" 버튼 (history 없으면 /dashboard로)
+ * - /dashboard에서는 버튼 숨김(원하면 아래 hideBack 로직 제거 가능)
  */
 
 // --- WebAudio 딩 사운드 (짧게) ---
@@ -50,11 +54,25 @@ function playDing() {
 
 export default function AdminGate() {
   const navigate = useNavigate();
+  const location = useLocation(); // ✅ 추가: 현재 경로 확인용
   const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
 
   // admin 아니면 즉시 차단
   if (role !== "admin") {
     return <Navigate to="/" replace />;
+  }
+
+  // ✅ 왼쪽 상단 뒤로가기 버튼
+  // - /dashboard에서는 숨김(원하면 아래 한 줄 지우면 항상 표시)
+  const hideBack = location?.pathname === "/dashboard";
+
+  function goBack() {
+    // 히스토리가 있으면 뒤로, 없으면 대시보드로
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate("/dashboard", { replace: true });
+    }
   }
 
   // 토스트 UI
@@ -272,6 +290,31 @@ export default function AdminGate() {
 
   return (
     <>
+      {/* ✅ 왼쪽 상단 뒤로가기 (AdminGate가 감싸는 모든 페이지에 공통 적용) */}
+      {!hideBack && (
+        <button
+          onClick={goBack}
+          style={{
+            position: "fixed",
+            top: 10,
+            left: 12,
+            zIndex: 99998, // 우측 상단 컨트롤(99998)과 같은 레벨
+            height: 34,
+            padding: "0 12px",
+            borderRadius: 999,
+            border: "1px solid #eee",
+            background: "#fff",
+            fontWeight: 900,
+            cursor: "pointer",
+            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+          }}
+          title="뒤로가기"
+          aria-label="뒤로가기"
+        >
+          ← 뒤로
+        </button>
+      )}
+
       {/* ✅ 전역 상단 작은 컨트롤(어느 관리자 페이지든) */}
       <div
         style={{

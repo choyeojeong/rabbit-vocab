@@ -37,6 +37,15 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
+  // ✅ 추가: 이미 로그인 상태면 로그인 페이지를 보여주지 않고 대시보드로 (뒤로가도 로그인 화면 방지)
+  useEffect(() => {
+    const role = sessionStorage.getItem('role'); // 'admin' | 'student' | null
+    if (role) {
+      navigate('/dashboard', { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     const remembered = getRememberedName();
     if (remembered) {
@@ -72,7 +81,7 @@ export default function LoginPage() {
         else clearRememberedName();
 
         // 관리자 영역으로 이동 (학생 대시보드 대신)
-        navigate('/dashboard');
+        navigate('/dashboard', { replace: true });
       } catch (e) {
         console.error(e);
         sessionStorage.removeItem('role');
@@ -120,7 +129,7 @@ export default function LoginPage() {
       if (remember) saveRememberedName(nm);
       else clearRememberedName();
 
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     } catch (e) {
       console.error(e);
       sessionStorage.removeItem('role');
