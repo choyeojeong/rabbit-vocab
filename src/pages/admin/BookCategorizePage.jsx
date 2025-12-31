@@ -3,6 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
+/**
+ * ✅ 변경점
+ * - 오른쪽 "소분류(leaf) 선택"을 뱃지 나열 → ✅ 트리(접기/펼치기) UI로 변경
+ * - 트리에서 leaf(자식 없는 노드)만 선택 가능
+ * - 상단에 "분류 검색" 입력 추가(경로 포함 검색)
+ * - 선택된 leaf는 하이라이트 + 상단에 현재 선택 경로 표시
+ */
+
 const styles = {
   page: { minHeight: "100vh", background: "#fff5f8", padding: 16 },
   wrap: { maxWidth: 1200, margin: "0 auto" },
@@ -34,7 +42,7 @@ const styles = {
     border: "1px solid #ffd6e5",
     outline: "none",
     background: "#fff",
-    color: "#1f2a44", // ✅ 글자색 명시
+    color: "#1f2a44",
   },
 
   btn: {
@@ -57,24 +65,22 @@ const styles = {
     cursor: "pointer",
   },
 
-  // ✅ 여기! 글자/아이콘이 안 보이던 핵심
   small: {
     padding: "7px 10px",
     borderRadius: 10,
     border: "1px solid #ffd6e5",
     background: "#fff",
-    color: "#1f2a44", // ✅ 글자색 명시
+    color: "#1f2a44",
     cursor: "pointer",
     fontWeight: 900,
     lineHeight: 1,
-    minWidth: 54, // ✅ 버튼이 너무 작아서 글자 묻히는 느낌 방지
+    minWidth: 54,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     boxShadow: "0 1px 0 rgba(0,0,0,0.03)",
   },
 
-  // 해제 버튼은 약간 더 눈에 띄게(연빨강 테두리)
   smallDanger: {
     padding: "7px 10px",
     borderRadius: 10,
@@ -92,20 +98,6 @@ const styles = {
 
   row: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
 
-  badge: (on) => ({
-    display: "inline-block",
-    padding: "7px 11px",
-    borderRadius: 999,
-    border: on ? "1px solid #ff6fa3" : "1px solid #ffd6e5",
-    background: on ? "#ff6fa3" : "#fff",
-    color: on ? "#fff" : "#1f2a44",
-    fontWeight: 900,
-    cursor: "pointer",
-    margin: "6px 8px 0 0",
-    fontSize: 12,
-    boxShadow: on ? "0 6px 14px rgba(255,111,163,0.20)" : "none",
-  }),
-
   bookRow: {
     padding: "10px 12px",
     borderRadius: 12,
@@ -119,7 +111,104 @@ const styles = {
   },
 
   muted: { color: "#5d6b82", fontSize: 13 },
+
+  // ✅ 트리 UI
+  treeBox: {
+    marginTop: 10,
+    border: "1px solid #ffe3ee",
+    borderRadius: 12,
+    padding: 10,
+    background: "#fffbfd",
+    maxHeight: "65vh",
+    overflow: "auto",
+  },
+  treeRow: (depth, selected, clickable) => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 10px",
+    borderRadius: 10,
+    marginLeft: depth * 16,
+    border: selected ? "1px solid #ff6fa3" : "1px solid transparent",
+    background: selected ? "#fff0f6" : "transparent",
+    cursor: clickable ? "pointer" : "default",
+    userSelect: "none",
+  }),
+  caretBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    border: "1px solid #ffd6e5",
+    background: "#fff",
+    color: "#1f2a44",
+    fontWeight: 900,
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flex: "0 0 auto",
+  },
+  caretGhost: { width: 28, height: 28, flex: "0 0 auto" },
+  nodeName: (isLeaf) => ({
+    fontWeight: 900,
+    color: "#1f2a44",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    flex: "1 1 auto",
+  }),
+  leafPill: {
+    padding: "2px 8px",
+    borderRadius: 999,
+    border: "1px solid #ffd6e5",
+    background: "#fff",
+    color: "#8a1f4b",
+    fontSize: 11,
+    fontWeight: 900,
+    flex: "0 0 auto",
+  },
+  selectedBar: {
+    marginTop: 10,
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #ffd6e5",
+    background: "#fff",
+  },
+  selectedPath: { fontWeight: 900, color: "#1f2a44" },
+  pathSmall: { fontSize: 12, color: "#5d6b82", marginTop: 4, whiteSpace: "pre-wrap" },
 };
+
+function buildTree(nodes) {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const childrenBy = new Map();
+  for (const n of nodes) {
+    const k = n.parent_id || "__root__";
+    if (!childrenBy.has(k)) childrenBy.set(k, []);
+    childrenBy.get(k).push(n);
+  }
+  for (const [, arr] of childrenBy.entries()) {
+    arr.sort(
+      (a, b) =>
+        (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+        (a.name || "").localeCompare(b.name || "")
+    );
+  }
+
+  const hasChild = new Set(nodes.filter((n) => n.parent_id).map((n) => n.parent_id));
+  const isLeaf = (id) => !hasChild.has(id);
+
+  const buildPath = (id) => {
+    const parts = [];
+    let cur = byId.get(id);
+    while (cur) {
+      parts.push(cur.name);
+      cur = cur.parent_id ? byId.get(cur.parent_id) : null;
+    }
+    return parts.reverse().join(" > ");
+  };
+
+  return { byId, childrenBy, roots: childrenBy.get("__root__") || [], isLeaf, buildPath };
+}
 
 export default function BookCategorizePage() {
   const nav = useNavigate();
@@ -131,27 +220,16 @@ export default function BookCategorizePage() {
   const [nodes, setNodes] = useState([]); // tree nodes
   const [selectedLeafId, setSelectedLeafId] = useState(null);
 
-  const leafNodes = useMemo(() => {
-    // leaf = 자식이 없는 노드
-    const hasChild = new Set(nodes.filter((n) => n.parent_id).map((n) => n.parent_id));
-    const leaf = nodes.filter((n) => !hasChild.has(n.id));
+  // ✅ 분류 검색
+  const [catQ, setCatQ] = useState("");
 
-    // 경로 라벨 만들기 위해 parent map
-    const byId = new Map(nodes.map((n) => [n.id, n]));
-    const buildPath = (id) => {
-      const parts = [];
-      let cur = byId.get(id);
-      while (cur) {
-        parts.push(cur.name);
-        cur = cur.parent_id ? byId.get(cur.parent_id) : null;
-      }
-      return parts.reverse().join(" > ");
-    };
+  const tree = useMemo(() => buildTree(nodes), [nodes]);
 
-    return leaf
-      .map((n) => ({ ...n, path: buildPath(n.id) }))
-      .sort((a, b) => a.path.localeCompare(b.path));
-  }, [nodes]);
+  // ✅ 선택된 leaf 경로
+  const selectedLeafPath = useMemo(() => {
+    if (!selectedLeafId) return "";
+    return tree.buildPath(selectedLeafId);
+  }, [selectedLeafId, tree]);
 
   const filteredBooks = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -194,7 +272,6 @@ export default function BookCategorizePage() {
     }
     try {
       setErr("");
-      // book 1개당 1개 분류: upsert
       const { error } = await supabase
         .from("book_category_map")
         .upsert({ book, category_id: selectedLeafId }, { onConflict: "book" });
@@ -215,6 +292,112 @@ export default function BookCategorizePage() {
       setErr(e?.message || String(e));
     }
   }
+
+  // ✅ 트리 접기/펼치기 상태
+  const [collapsed, setCollapsed] = useState({}); // { [nodeId]: true }
+
+  // 검색 시: 매칭 경로는 자동 펼치기
+  useEffect(() => {
+    const t = catQ.trim().toLowerCase();
+    if (!t) return;
+
+    const toOpen = new Set();
+    for (const n of nodes) {
+      const path = tree.buildPath(n.id).toLowerCase();
+      if (path.includes(t)) {
+        // 조상들을 전부 open 대상으로
+        let cur = tree.byId.get(n.id);
+        while (cur?.parent_id) {
+          toOpen.add(cur.parent_id);
+          cur = tree.byId.get(cur.parent_id);
+        }
+      }
+    }
+    if (toOpen.size) {
+      setCollapsed((prev) => {
+        const next = { ...prev };
+        for (const id of toOpen) next[id] = false;
+        return next;
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catQ]);
+
+  function toggle(id) {
+    setCollapsed((p) => ({ ...p, [id]: !p[id] }));
+  }
+
+  const catFilterText = catQ.trim().toLowerCase();
+  const nodeMatches = (id) => {
+    if (!catFilterText) return true;
+    const p = tree.buildPath(id).toLowerCase();
+    return p.includes(catFilterText);
+  };
+
+  // ✅ 필터가 있을 때는: 매칭 노드 + 매칭 노드의 조상만 표시
+  const visibleSet = useMemo(() => {
+    if (!catFilterText) return null; // null = 모두 표시
+    const vis = new Set();
+
+    for (const n of nodes) {
+      if (!nodeMatches(n.id)) continue;
+      // 해당 노드 + 조상들
+      let cur = tree.byId.get(n.id);
+      while (cur) {
+        vis.add(cur.id);
+        cur = cur.parent_id ? tree.byId.get(cur.parent_id) : null;
+      }
+    }
+    return vis;
+  }, [catFilterText, nodes, tree]);
+
+  const renderTreeNode = (n, depth) => {
+    if (visibleSet && !visibleSet.has(n.id)) return null;
+
+    const kids = tree.childrenBy.get(n.id) || [];
+    const hasKids = kids.length > 0;
+    const leaf = tree.isLeaf(n.id);
+
+    const selected = selectedLeafId === n.id;
+    const clickable = leaf; // ✅ leaf만 선택 가능
+
+    return (
+      <div key={n.id}>
+        <div
+          style={styles.treeRow(depth, selected, clickable)}
+          onClick={() => {
+            if (!leaf) return; // leaf가 아니면 선택 X
+            setSelectedLeafId((p) => (p === n.id ? null : n.id));
+          }}
+          title={tree.buildPath(n.id)}
+        >
+          {hasKids ? (
+            <button
+              type="button"
+              style={styles.caretBtn}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggle(n.id);
+              }}
+              title={collapsed[n.id] ? "펼치기" : "접기"}
+            >
+              {collapsed[n.id] ? "▶" : "▼"}
+            </button>
+          ) : (
+            <span style={styles.caretGhost} />
+          )}
+
+          <div style={styles.nodeName(leaf)}>
+            {n.name}
+          </div>
+
+          {leaf && <span style={styles.leafPill}>leaf</span>}
+        </div>
+
+        {hasKids && !collapsed[n.id] && kids.map((c) => renderTreeNode(c, depth + 1))}
+      </div>
+    );
+  };
 
   return (
     <div style={styles.page}>
@@ -293,28 +476,57 @@ export default function BookCategorizePage() {
             ))}
           </div>
 
-          {/* 오른쪽: 소분류 선택 */}
+          {/* 오른쪽: 트리로 소분류 선택 */}
           <div style={styles.card}>
-            <div style={{ fontWeight: 900, color: "#1f2a44" }}>소분류 선택(leaf)</div>
+            <div style={{ fontWeight: 900, color: "#1f2a44" }}>분류 선택(트리)</div>
             <div style={{ ...styles.muted, marginTop: 6 }}>
-              아래에서 소분류를 하나 선택한 뒤, 왼쪽 책에서 “지정”을 누르세요.
+              ✅ leaf(자식 없는 항목)만 선택할 수 있어요. 선택 후 왼쪽 책에서 “지정”을 누르세요.
             </div>
 
-            <div style={{ marginTop: 10 }}>
-              {leafNodes.length === 0 && (
-                <div style={styles.muted}>아직 leaf가 없습니다. 먼저 분류 트리를 만들어 주세요.</div>
-              )}
+            {/* 분류 검색 */}
+            <div style={{ ...styles.row, marginTop: 10 }}>
+              <input
+                style={styles.input}
+                value={catQ}
+                onChange={(e) => setCatQ(e.target.value)}
+                placeholder="분류 검색 (예: 수능 / 품사 / 명사 / 관계대명사 ...)"
+              />
+              <button
+                style={styles.btn2}
+                onClick={() => setCollapsed({})}
+                title="전부 펼치기"
+              >
+                전부 펼치기
+              </button>
+              <button
+                style={styles.btn2}
+                onClick={() => {
+                  const next = {};
+                  for (const r of tree.roots) next[r.id] = true; // 루트의 하위만 접기
+                  setCollapsed(next);
+                }}
+                title="하위 접기"
+              >
+                하위 접기
+              </button>
+            </div>
 
-              {leafNodes.map((n) => (
-                <span
-                  key={n.id}
-                  style={styles.badge(selectedLeafId === n.id)}
-                  onClick={() => setSelectedLeafId((p) => (p === n.id ? null : n.id))}
-                  title={n.path}
-                >
-                  {n.path}
-                </span>
-              ))}
+            {/* 현재 선택 표시 */}
+            <div style={styles.selectedBar}>
+              <div style={styles.selectedPath}>
+                현재 선택: {selectedLeafId ? "✅ 선택됨" : "—"}
+              </div>
+              <div style={styles.pathSmall}>
+                {selectedLeafId ? selectedLeafPath : "오른쪽 트리에서 leaf를 클릭해 선택하세요."}
+              </div>
+            </div>
+
+            <div style={styles.treeBox}>
+              {nodes.length === 0 ? (
+                <div style={styles.muted}>분류 트리가 없습니다. 먼저 “분류 트리”에서 만들어 주세요.</div>
+              ) : (
+                tree.roots.map((r) => renderTreeNode(r, 0))
+              )}
             </div>
           </div>
         </div>
