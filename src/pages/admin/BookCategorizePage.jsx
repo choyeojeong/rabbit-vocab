@@ -1,3 +1,4 @@
+// src/pages/admin/BookCategorizePage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { useNavigate } from "react-router-dom";
@@ -5,29 +6,118 @@ import { useNavigate } from "react-router-dom";
 const styles = {
   page: { minHeight: "100vh", background: "#fff5f8", padding: 16 },
   wrap: { maxWidth: 1200, margin: "0 auto" },
-  head: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  head: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    gap: 12,
+    flexWrap: "wrap",
+  },
   title: { fontSize: 22, fontWeight: 900, color: "#1f2a44" },
   sub: { fontSize: 13, color: "#5d6b82", marginTop: 4 },
+
   grid: { display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 12 },
-  card: { background: "#fff", border: "1px solid #ffd6e5", borderRadius: 14, padding: 14, boxShadow: "0 6px 18px rgba(0,0,0,0.06)" },
-  input: { width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid #ffd6e5", outline: "none" },
-  btn: { padding: "10px 12px", borderRadius: 12, border: "1px solid #ff6fa3", background: "#ff6fa3", color: "#fff", fontWeight: 800, cursor: "pointer" },
-  btn2: { padding: "10px 12px", borderRadius: 12, border: "1px solid #ffd6e5", background: "#fff", color: "#1f2a44", fontWeight: 800, cursor: "pointer" },
-  small: { padding: "6px 10px", borderRadius: 10, border: "1px solid #ffd6e5", background: "#fff", cursor: "pointer", fontWeight: 800 },
+
+  card: {
+    background: "#fff",
+    border: "1px solid #ffd6e5",
+    borderRadius: 14,
+    padding: 14,
+    boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+  },
+
+  input: {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #ffd6e5",
+    outline: "none",
+    background: "#fff",
+    color: "#1f2a44", // ✅ 글자색 명시
+  },
+
+  btn: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #ff6fa3",
+    background: "#ff6fa3",
+    color: "#fff",
+    fontWeight: 900,
+    cursor: "pointer",
+    letterSpacing: 0.2,
+  },
+  btn2: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #ffd6e5",
+    background: "#fff",
+    color: "#1f2a44",
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+
+  // ✅ 여기! 글자/아이콘이 안 보이던 핵심
+  small: {
+    padding: "7px 10px",
+    borderRadius: 10,
+    border: "1px solid #ffd6e5",
+    background: "#fff",
+    color: "#1f2a44", // ✅ 글자색 명시
+    cursor: "pointer",
+    fontWeight: 900,
+    lineHeight: 1,
+    minWidth: 54, // ✅ 버튼이 너무 작아서 글자 묻히는 느낌 방지
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 1px 0 rgba(0,0,0,0.03)",
+  },
+
+  // 해제 버튼은 약간 더 눈에 띄게(연빨강 테두리)
+  smallDanger: {
+    padding: "7px 10px",
+    borderRadius: 10,
+    border: "1px solid #ffb3c8",
+    background: "#fff6f8",
+    color: "#b42318",
+    cursor: "pointer",
+    fontWeight: 900,
+    lineHeight: 1,
+    minWidth: 54,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   row: { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" },
+
   badge: (on) => ({
     display: "inline-block",
-    padding: "6px 10px",
+    padding: "7px 11px",
     borderRadius: 999,
-    border: "1px solid #ffd6e5",
+    border: on ? "1px solid #ff6fa3" : "1px solid #ffd6e5",
     background: on ? "#ff6fa3" : "#fff",
     color: on ? "#fff" : "#1f2a44",
     fontWeight: 900,
     cursor: "pointer",
-    margin: "4px 6px 0 0",
+    margin: "6px 8px 0 0",
     fontSize: 12,
+    boxShadow: on ? "0 6px 14px rgba(255,111,163,0.20)" : "none",
   }),
-  bookRow: { padding: "10px 12px", borderRadius: 12, border: "1px solid #ffe3ee", marginTop: 8, display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" },
+
+  bookRow: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #ffe3ee",
+    marginTop: 8,
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    alignItems: "center",
+    background: "#fff",
+  },
+
   muted: { color: "#5d6b82", fontSize: 13 },
 };
 
@@ -43,10 +133,11 @@ export default function BookCategorizePage() {
 
   const leafNodes = useMemo(() => {
     // leaf = 자식이 없는 노드
-    const hasChild = new Set(nodes.filter(n => n.parent_id).map(n => n.parent_id));
-    const leaf = nodes.filter(n => !hasChild.has(n.id));
+    const hasChild = new Set(nodes.filter((n) => n.parent_id).map((n) => n.parent_id));
+    const leaf = nodes.filter((n) => !hasChild.has(n.id));
+
     // 경로 라벨 만들기 위해 parent map
-    const byId = new Map(nodes.map(n => [n.id, n]));
+    const byId = new Map(nodes.map((n) => [n.id, n]));
     const buildPath = (id) => {
       const parts = [];
       let cur = byId.get(id);
@@ -56,15 +147,16 @@ export default function BookCategorizePage() {
       }
       return parts.reverse().join(" > ");
     };
+
     return leaf
-      .map(n => ({ ...n, path: buildPath(n.id) }))
-      .sort((a,b)=>a.path.localeCompare(b.path));
+      .map((n) => ({ ...n, path: buildPath(n.id) }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   }, [nodes]);
 
   const filteredBooks = useMemo(() => {
     const t = q.trim().toLowerCase();
     if (!t) return books;
-    return books.filter(b => (b.book || "").toLowerCase().includes(t));
+    return books.filter((b) => (b.book || "").toLowerCase().includes(t));
   }, [books, q]);
 
   async function load() {
@@ -74,7 +166,10 @@ export default function BookCategorizePage() {
 
       const [{ data: bs, error: e1 }, { data: ns, error: e2 }] = await Promise.all([
         supabase.from("v_books_with_category").select("book, category_id, category_path"),
-        supabase.from("book_category_nodes").select("id, parent_id, name, sort_order, created_at").order("sort_order", { ascending: true }),
+        supabase
+          .from("book_category_nodes")
+          .select("id, parent_id, name, sort_order, created_at")
+          .order("sort_order", { ascending: true }),
       ]);
       if (e1) throw e1;
       if (e2) throw e2;
@@ -88,7 +183,9 @@ export default function BookCategorizePage() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   async function assign(book) {
     if (!selectedLeafId) {
@@ -128,9 +225,15 @@ export default function BookCategorizePage() {
             <div style={styles.sub}>업로드된 책(book) 목록을 소분류(leaf)에 매핑합니다.</div>
           </div>
           <div style={styles.row}>
-            <button style={styles.btn2} onClick={() => nav("/teacher/book-categories")}>← 분류 트리</button>
-            <button style={styles.btn2} onClick={() => nav("/dashboard")}>대시보드</button>
-            <button style={styles.btn} onClick={load} disabled={loading}>{loading ? "불러오는 중..." : "새로고침"}</button>
+            <button style={styles.btn2} onClick={() => nav("/teacher/book-categories")}>
+              ← 분류 트리
+            </button>
+            <button style={styles.btn2} onClick={() => nav("/dashboard")}>
+              대시보드
+            </button>
+            <button style={styles.btn} onClick={load} disabled={loading}>
+              {loading ? "불러오는 중..." : "새로고침"}
+            </button>
           </div>
         </div>
 
@@ -161,7 +264,16 @@ export default function BookCategorizePage() {
             {filteredBooks.map((b) => (
               <div key={b.book} style={styles.bookRow}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 900, color: "#1f2a44", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div
+                    style={{
+                      fontWeight: 900,
+                      color: "#1f2a44",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={b.book}
+                  >
                     {b.book}
                   </div>
                   <div style={styles.muted}>
@@ -170,8 +282,12 @@ export default function BookCategorizePage() {
                 </div>
 
                 <div style={styles.row}>
-                  <button style={styles.small} onClick={() => assign(b.book)}>지정</button>
-                  <button style={styles.small} onClick={() => clearAssign(b.book)}>해제</button>
+                  <button style={styles.small} onClick={() => assign(b.book)}>
+                    지정
+                  </button>
+                  <button style={styles.smallDanger} onClick={() => clearAssign(b.book)}>
+                    해제
+                  </button>
                 </div>
               </div>
             ))}

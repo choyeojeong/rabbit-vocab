@@ -1,3 +1,4 @@
+// src/pages/admin/BookCategoryManagePage.jsx
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { useNavigate } from "react-router-dom";
@@ -5,15 +6,98 @@ import { useNavigate } from "react-router-dom";
 const styles = {
   page: { minHeight: "100vh", background: "#fff5f8", padding: 16 },
   wrap: { maxWidth: 1100, margin: "0 auto" },
-  head: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  head: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    gap: 12,
+    flexWrap: "wrap",
+  },
   title: { fontSize: 22, fontWeight: 900, color: "#1f2a44" },
-  card: { background: "#fff", border: "1px solid #ffd6e5", borderRadius: 14, padding: 14, boxShadow: "0 6px 18px rgba(0,0,0,0.06)" },
+
+  card: {
+    background: "#fff",
+    border: "1px solid #ffd6e5",
+    borderRadius: 14,
+    padding: 14,
+    boxShadow: "0 6px 18px rgba(0,0,0,0.06)",
+  },
   row: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
-  input: { padding: "10px 12px", borderRadius: 12, border: "1px solid #ffd6e5", outline: "none", minWidth: 220 },
-  btn: { padding: "10px 12px", borderRadius: 12, border: "1px solid #ff6fa3", background: "#ff6fa3", color: "#fff", fontWeight: 800, cursor: "pointer" },
-  btn2: { padding: "10px 12px", borderRadius: 12, border: "1px solid #ffd6e5", background: "#fff", color: "#1f2a44", fontWeight: 800, cursor: "pointer" },
-  small: { padding: "6px 10px", borderRadius: 10, border: "1px solid #ffd6e5", background: "#fff", cursor: "pointer", fontWeight: 800 },
-  tag: { display: "inline-block", padding: "6px 10px", borderRadius: 999, background: "#ffe3ee", color: "#8a1f4b", fontWeight: 900, fontSize: 12 },
+
+  input: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #ffd6e5",
+    outline: "none",
+    minWidth: 220,
+    background: "#fff",
+    color: "#1f2a44",
+  },
+
+  btn: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #ff6fa3",
+    background: "#ff6fa3",
+    color: "#fff",
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+  btn2: {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #ffd6e5",
+    background: "#fff",
+    color: "#1f2a44",
+    fontWeight: 900,
+    cursor: "pointer",
+  },
+
+  // ✅ 여기서 글자색/배경/호버가 확실히 보이도록 보강
+  small: {
+    padding: "7px 10px",
+    borderRadius: 10,
+    border: "1px solid #ffd6e5",
+    background: "#ffffff",
+    color: "#1f2a44",              // ✅ 글자색 명시
+    cursor: "pointer",
+    fontWeight: 900,
+    lineHeight: 1,
+    minWidth: 40,                   // ✅ 너무 작아져서 안 보이는 느낌 방지
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 1px 0 rgba(0,0,0,0.03)",
+  },
+
+  // 삭제 버튼은 눈에 띄게(연빨강)
+  smallDanger: {
+    padding: "7px 10px",
+    borderRadius: 10,
+    border: "1px solid #ffb3c8",
+    background: "#fff6f8",
+    color: "#b42318",
+    cursor: "pointer",
+    fontWeight: 900,
+    lineHeight: 1,
+    minWidth: 52,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  tag: {
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: 999,
+    background: "#ffe3ee",
+    color: "#8a1f4b",
+    fontWeight: 900,
+    fontSize: 12,
+    border: "1px solid #ffd6e5",
+  },
+
   node: (lvl) => ({
     display: "flex",
     alignItems: "center",
@@ -24,19 +108,23 @@ const styles = {
     background: lvl === 0 ? "#fff" : lvl === 1 ? "#fff8fb" : "#fffbfd",
     marginTop: 8,
     marginLeft: lvl * 18,
+    gap: 10,
   }),
 };
 
 function normalizeSort(rows) {
-  // 같은 parent_id끼리 sort_order 정렬
   const groups = new Map();
   for (const r of rows) {
     const k = r.parent_id || "__root__";
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   }
-  for (const [k, arr] of groups.entries()) {
-    arr.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name));
+  for (const [, arr] of groups.entries()) {
+    arr.sort(
+      (a, b) =>
+        (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+        (a.name || "").localeCompare(b.name || "")
+    );
     arr.forEach((r, i) => (r._idx = i));
   }
   return rows;
@@ -49,8 +137,8 @@ export default function BookCategoryManagePage() {
   const [err, setErr] = useState("");
 
   const [newRoot, setNewRoot] = useState("");
-  const [newMidBy, setNewMidBy] = useState({});  // {parentId: text}
-  const [newLeafBy, setNewLeafBy] = useState({}); // {parentId: text}
+  const [newMidBy, setNewMidBy] = useState({});
+  const [newLeafBy, setNewLeafBy] = useState({});
 
   const tree = useMemo(() => {
     const byParent = new Map();
@@ -60,7 +148,11 @@ export default function BookCategoryManagePage() {
       byParent.get(k).push(r);
     }
     const sortArr = (a) =>
-      [...a].sort((x, y) => (x.sort_order ?? 0) - (y.sort_order ?? 0) || x.name.localeCompare(y.name));
+      [...a].sort(
+        (x, y) =>
+          (x.sort_order ?? 0) - (y.sort_order ?? 0) ||
+          (x.name || "").localeCompare(y.name || "")
+      );
 
     const roots = sortArr(byParent.get("__root__") || []);
     const mids = (pid) => sortArr(byParent.get(pid) || []);
@@ -78,6 +170,7 @@ export default function BookCategoryManagePage() {
         .select("id, parent_id, name, sort_order, created_at")
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true });
+
       if (error) throw error;
       setRows(normalizeSort(data || []));
     } catch (e) {
@@ -95,9 +188,10 @@ export default function BookCategoryManagePage() {
     const nm = (name || "").trim();
     if (!nm) return;
 
-    // 같은 parent 아래 max(sort_order)+1로 넣기
     const siblings = rows.filter((r) => (r.parent_id || null) === (parentId || null));
-    const next = siblings.length ? Math.max(...siblings.map((s) => s.sort_order ?? 0)) + 1 : 0;
+    const next = siblings.length
+      ? Math.max(...siblings.map((s) => s.sort_order ?? 0)) + 1
+      : 0;
 
     const { error } = await supabase.from("book_category_nodes").insert({
       parent_id: parentId || null,
@@ -117,7 +211,6 @@ export default function BookCategoryManagePage() {
   }
 
   async function deleteNode(id) {
-    // on delete cascade로 자식도 같이 삭제
     const { error } = await supabase.from("book_category_nodes").delete().eq("id", id);
     if (error) throw error;
     await load();
@@ -135,9 +228,16 @@ export default function BookCategoryManagePage() {
     const a = siblings[idx];
     const b = siblings[swapIdx];
 
-    const { error: e1 } = await supabase.from("book_category_nodes").update({ sort_order: b.sort_order ?? 0 }).eq("id", a.id);
+    const { error: e1 } = await supabase
+      .from("book_category_nodes")
+      .update({ sort_order: b.sort_order ?? 0 })
+      .eq("id", a.id);
     if (e1) throw e1;
-    const { error: e2 } = await supabase.from("book_category_nodes").update({ sort_order: a.sort_order ?? 0 }).eq("id", b.id);
+
+    const { error: e2 } = await supabase
+      .from("book_category_nodes")
+      .update({ sort_order: a.sort_order ?? 0 })
+      .eq("id", b.id);
     if (e2) throw e2;
 
     await load();
@@ -154,15 +254,21 @@ export default function BookCategoryManagePage() {
             </div>
           </div>
           <div style={styles.row}>
-            <button style={styles.btn2} onClick={() => nav("/dashboard")}>← 대시보드</button>
-            <button style={styles.btn} onClick={() => nav("/teacher/book-categorize")}>책 분류 지정 →</button>
+            <button style={styles.btn2} onClick={() => nav("/dashboard")}>
+              ← 대시보드
+            </button>
+            <button style={styles.btn} onClick={() => nav("/teacher/book-categorize")}>
+              책 분류 지정 →
+            </button>
           </div>
         </div>
 
         {err && (
           <div style={{ ...styles.card, borderColor: "#ffb3c8", marginBottom: 12 }}>
             <div style={{ color: "#b42318", fontWeight: 900 }}>에러</div>
-            <div style={{ color: "#b42318", marginTop: 6, whiteSpace: "pre-wrap" }}>{err}</div>
+            <div style={{ color: "#b42318", marginTop: 6, whiteSpace: "pre-wrap" }}>
+              {err}
+            </div>
           </div>
         )}
 
@@ -201,28 +307,53 @@ export default function BookCategoryManagePage() {
 
           <div style={{ marginTop: 14 }}>
             {tree.roots.length === 0 && (
-              <div style={{ color: "#5d6b82" }}>아직 대분류가 없습니다. 위에서 추가해 주세요.</div>
+              <div style={{ color: "#5d6b82" }}>
+                아직 대분류가 없습니다. 위에서 추가해 주세요.
+              </div>
             )}
 
             {tree.roots.map((r) => (
               <div key={r.id}>
                 <div style={styles.node(0)}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                     <span style={styles.tag}>대</span>
                     <strong style={{ color: "#1f2a44" }}>{r.name}</strong>
-                    <button style={styles.small} onClick={() => {
-                      const nm = prompt("대분류 이름 수정", r.name);
-                      if (nm !== null) renameNode(r.id, nm).catch((e)=>setErr(e?.message||String(e)));
-                    }}>이름</button>
+                    <button
+                      style={styles.small}
+                      onClick={() => {
+                        const nm = prompt("대분류 이름 수정", r.name);
+                        if (nm !== null) renameNode(r.id, nm).catch((e) => setErr(e?.message || String(e)));
+                      }}
+                    >
+                      이름
+                    </button>
                   </div>
                   <div style={styles.row}>
-                    <button style={styles.small} onClick={() => moveUpDown(r, "up").catch((e)=>setErr(e?.message||String(e)))}>↑</button>
-                    <button style={styles.small} onClick={() => moveUpDown(r, "down").catch((e)=>setErr(e?.message||String(e)))}>↓</button>
-                    <button style={styles.small} onClick={() => {
-                      if (confirm("이 대분류를 삭제할까요? (중/소분류도 함께 삭제)")) {
-                        deleteNode(r.id).catch((e)=>setErr(e?.message||String(e)));
-                      }
-                    }}>삭제</button>
+                    <button
+                      style={styles.small}
+                      onClick={() => moveUpDown(r, "up").catch((e) => setErr(e?.message || String(e)))}
+                      title="위로"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      style={styles.small}
+                      onClick={() => moveUpDown(r, "down").catch((e) => setErr(e?.message || String(e)))}
+                      title="아래로"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      style={styles.smallDanger}
+                      onClick={() => {
+                        if (confirm("이 대분류를 삭제할까요? (중/소분류도 함께 삭제)")) {
+                          deleteNode(r.id).catch((e) => setErr(e?.message || String(e)));
+                        }
+                      }}
+                      title="삭제"
+                    >
+                      🗑 삭제
+                    </button>
                   </div>
                 </div>
 
@@ -254,22 +385,45 @@ export default function BookCategoryManagePage() {
                 {tree.mids(r.id).map((m) => (
                   <div key={m.id}>
                     <div style={styles.node(1)}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                         <span style={styles.tag}>중</span>
                         <strong style={{ color: "#1f2a44" }}>{m.name}</strong>
-                        <button style={styles.small} onClick={() => {
-                          const nm = prompt("중분류 이름 수정", m.name);
-                          if (nm !== null) renameNode(m.id, nm).catch((e)=>setErr(e?.message||String(e)));
-                        }}>이름</button>
+                        <button
+                          style={styles.small}
+                          onClick={() => {
+                            const nm = prompt("중분류 이름 수정", m.name);
+                            if (nm !== null) renameNode(m.id, nm).catch((e) => setErr(e?.message || String(e)));
+                          }}
+                        >
+                          이름
+                        </button>
                       </div>
                       <div style={styles.row}>
-                        <button style={styles.small} onClick={() => moveUpDown(m, "up").catch((e)=>setErr(e?.message||String(e)))}>↑</button>
-                        <button style={styles.small} onClick={() => moveUpDown(m, "down").catch((e)=>setErr(e?.message||String(e)))}>↓</button>
-                        <button style={styles.small} onClick={() => {
-                          if (confirm("이 중분류를 삭제할까요? (소분류도 함께 삭제)")) {
-                            deleteNode(m.id).catch((e)=>setErr(e?.message||String(e)));
-                          }
-                        }}>삭제</button>
+                        <button
+                          style={styles.small}
+                          onClick={() => moveUpDown(m, "up").catch((e) => setErr(e?.message || String(e)))}
+                          title="위로"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          style={styles.small}
+                          onClick={() => moveUpDown(m, "down").catch((e) => setErr(e?.message || String(e)))}
+                          title="아래로"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          style={styles.smallDanger}
+                          onClick={() => {
+                            if (confirm("이 중분류를 삭제할까요? (소분류도 함께 삭제)")) {
+                              deleteNode(m.id).catch((e) => setErr(e?.message || String(e)));
+                            }
+                          }}
+                          title="삭제"
+                        >
+                          🗑 삭제
+                        </button>
                       </div>
                     </div>
 
@@ -300,22 +454,45 @@ export default function BookCategoryManagePage() {
                     {/* 소분류 목록 */}
                     {tree.leafs(m.id).map((s) => (
                       <div key={s.id} style={styles.node(2)}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                           <span style={styles.tag}>소</span>
                           <strong style={{ color: "#1f2a44" }}>{s.name}</strong>
-                          <button style={styles.small} onClick={() => {
-                            const nm = prompt("소분류 이름 수정", s.name);
-                            if (nm !== null) renameNode(s.id, nm).catch((e)=>setErr(e?.message||String(e)));
-                          }}>이름</button>
+                          <button
+                            style={styles.small}
+                            onClick={() => {
+                              const nm = prompt("소분류 이름 수정", s.name);
+                              if (nm !== null) renameNode(s.id, nm).catch((e) => setErr(e?.message || String(e)));
+                            }}
+                          >
+                            이름
+                          </button>
                         </div>
                         <div style={styles.row}>
-                          <button style={styles.small} onClick={() => moveUpDown(s, "up").catch((e)=>setErr(e?.message||String(e)))}>↑</button>
-                          <button style={styles.small} onClick={() => moveUpDown(s, "down").catch((e)=>setErr(e?.message||String(e)))}>↓</button>
-                          <button style={styles.small} onClick={() => {
-                            if (confirm("이 소분류를 삭제할까요?")) {
-                              deleteNode(s.id).catch((e)=>setErr(e?.message||String(e)));
-                            }
-                          }}>삭제</button>
+                          <button
+                            style={styles.small}
+                            onClick={() => moveUpDown(s, "up").catch((e) => setErr(e?.message || String(e)))}
+                            title="위로"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            style={styles.small}
+                            onClick={() => moveUpDown(s, "down").catch((e) => setErr(e?.message || String(e)))}
+                            title="아래로"
+                          >
+                            ↓
+                          </button>
+                          <button
+                            style={styles.smallDanger}
+                            onClick={() => {
+                              if (confirm("이 소분류를 삭제할까요?")) {
+                                deleteNode(s.id).catch((e) => setErr(e?.message || String(e)));
+                              }
+                            }}
+                            title="삭제"
+                          >
+                            🗑 삭제
+                          </button>
                         </div>
                       </div>
                     ))}
