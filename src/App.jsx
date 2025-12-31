@@ -32,6 +32,10 @@ import CsvBatchListPage from "./pages/admin/CsvBatchListPage";
 // ✅ 관리자 게이트
 import AdminGate from "./pages/admin/AdminGate";
 
+// ✅ 단어책 분류(신규)
+import BookCategoryManagePage from "./pages/admin/BookCategoryManagePage";
+import BookCategorizePage from "./pages/admin/BookCategorizePage";
+
 // 학생 보호
 import { ensureLiveStudent, getSession } from "./utils/session";
 
@@ -126,7 +130,6 @@ function LoginGate({ children }) {
     }
   }, [navigate]);
 
-  // role이 있으면 곧바로 replace될 것이고, 없으면 로그인 UI 그대로 렌더
   return children;
 }
 
@@ -153,7 +156,7 @@ export default function App() {
               <LoginPage />
             </LoginGate>
           }
-        />{" "}
+        />
         {/* ✅ alias */}
         <Route path="/register" element={<RegisterPage />} />
 
@@ -243,9 +246,16 @@ export default function App() {
           <Route path="/teacher/csv" element={<CsvManagePage />} />
           <Route path="/teacher/csv/batches" element={<CsvBatchListPage />} />
 
+          {/* ✅ 단어책 분류(신규) */}
+          <Route path="/teacher/book-categories" element={<BookCategoryManagePage />} />
+          <Route path="/teacher/book-categorize" element={<BookCategorizePage />} />
+
+          {/* admin alias */}
           <Route path="/admin/users" element={<TeacherManagePage />} />
           <Route path="/admin/csv" element={<CsvManagePage />} />
           <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
+          <Route path="/admin/book-categories" element={<BookCategoryManagePage />} />
+          <Route path="/admin/book-categorize" element={<BookCategorizePage />} />
         </Route>
 
         {/* fallback */}
