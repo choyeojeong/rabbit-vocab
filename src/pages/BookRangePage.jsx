@@ -52,7 +52,6 @@ export default function BookRangePage({ mode = "practice" }) {
           (a.name || "").localeCompare(b.name || "")
       );
 
-    // 정렬된 childrenBy
     const getChildren = (pid) => sortArr(childrenBy.get(pid || "__root__") || []);
 
     // leaf 판정(자식 없음)
@@ -71,9 +70,6 @@ export default function BookRangePage({ mode = "practice" }) {
 
     return { byId, getChildren, isLeaf, buildPath };
   }, [catNodes]);
-
-  // 선택된 leaf 기준으로 "해당 leaf + 모든 하위 leaf" 같은 개념은 필요 없음
-  // (매핑은 leaf에만 붙는다고 가정. leaf가 아닌 노드 선택을 막습니다.)
 
   // =========================
   // 책 목록 필터
@@ -104,7 +100,10 @@ export default function BookRangePage({ mode = "practice" }) {
     return list;
   }, [bookMeta, onlyCategorized, selectedCategoryId, bookSearch]);
 
-  const filteredBooks = useMemo(() => filteredBookMeta.map((x) => x.book), [filteredBookMeta]);
+  const filteredBooks = useMemo(
+    () => filteredBookMeta.map((x) => x.book).filter(Boolean),
+    [filteredBookMeta]
+  );
 
   // =========================
   // 데이터 로드
@@ -134,7 +133,6 @@ export default function BookRangePage({ mode = "practice" }) {
 
       if (!ve && Array.isArray(vw) && vw.length) {
         setBookMeta(vw);
-        // 선택된 책 보정은 아래 useEffect에서 filteredBooks 기준으로 처리
         if (!keepSelection) {
           const first = vw.map((x) => x.book).find(Boolean) || "";
           setBook(first);
@@ -170,7 +168,7 @@ export default function BookRangePage({ mode = "practice" }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 필터 결과에 맞춰 선택 book 보정
+  // ✅ 필터 결과에 맞춰 선택 book 보정 (드롭다운/리스트 없이 자동으로 첫 번째 책 선택)
   useEffect(() => {
     if (loadingBooks) return;
 
@@ -178,7 +176,6 @@ export default function BookRangePage({ mode = "practice" }) {
       if (book) setBook("");
       return;
     }
-
     if (!book || !filteredBooks.includes(book)) {
       setBook(filteredBooks[0]);
     }
@@ -240,7 +237,7 @@ export default function BookRangePage({ mode = "practice" }) {
 
   function guardAndGetChapters() {
     if (!book) {
-      alert("단어책을 선택해 주세요.");
+      alert("단어책이 선택되지 않았습니다. (검색/분류 조건을 확인해 주세요)");
       return null;
     }
     if (!chapterInput.trim()) {
@@ -290,7 +287,6 @@ export default function BookRangePage({ mode = "practice" }) {
     const q = (catSearch || "").trim().toLowerCase();
     if (!q) return null;
 
-    // 검색어 매칭되는 노드 + 그 조상들을 visible로
     const visible = new Set();
     const matched = catNodes.filter((n) => (n.name || "").toLowerCase().includes(q));
 
@@ -315,7 +311,6 @@ export default function BookRangePage({ mode = "practice" }) {
   }
 
   function ensureExpandPathTo(id) {
-    // 선택/검색 시 조상 자동 펼침
     const byId = tree.byId;
     const toOpen = [];
     let cur = byId.get(id);
@@ -333,7 +328,6 @@ export default function BookRangePage({ mode = "practice" }) {
 
   function onPickLeaf(id) {
     if (!tree.isLeaf(id)) {
-      // non-leaf는 펼침만
       toggleExpand(id);
       return;
     }
@@ -341,7 +335,7 @@ export default function BookRangePage({ mode = "practice" }) {
     ensureExpandPathTo(id);
   }
 
-  // 검색 시 matched 조상 자동 펼침
+  // 검색 시 조상 자동 펼침
   useEffect(() => {
     if (!catFilter?.visible) return;
     setExpanded((prev) => {
@@ -351,7 +345,6 @@ export default function BookRangePage({ mode = "practice" }) {
     });
   }, [catFilter]);
 
-  // 트리 렌더
   function renderTree(parentId = null, level = 0) {
     const children = tree.getChildren(parentId);
     if (!children.length) return null;
@@ -363,11 +356,10 @@ export default function BookRangePage({ mode = "practice" }) {
           const hasKids = kids.length > 0;
           const leaf = tree.isLeaf(n.id);
 
-          // 검색 필터가 있으면 visible에 포함된 것만
           if (catFilter?.visible && !catFilter.visible.has(n.id)) return null;
 
           const isOn = selectedCategoryId === n.id;
-          const isOpen = expanded.has(n.id) || !!catFilter?.visible; // 검색 시는 펼침 느낌
+          const isOpen = expanded.has(n.id) || !!catFilter?.visible;
 
           return (
             <div key={n.id} style={{ marginTop: 6 }}>
@@ -410,13 +402,18 @@ export default function BookRangePage({ mode = "practice" }) {
                     {isOpen ? "▾" : "▸"}
                   </span>
                 ) : (
-                  <span style={{ width: 18, textAlign: "center", opacity: isOn ? 0.9 : 0.5 }}>
-                    •
-                  </span>
+                  <span style={{ width: 18, textAlign: "center", opacity: isOn ? 0.9 : 0.5 }}>•</span>
                 )}
 
                 <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span
+                    style={{
+                      fontWeight: 900,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
                     {n.name}
                   </span>
                   {leaf && (
@@ -445,24 +442,32 @@ export default function BookRangePage({ mode = "practice" }) {
     );
   }
 
-  // 선택된 카테고리 경로 표시
   const selectedCategoryPath = useMemo(() => {
     if (!selectedCategoryId) return "";
     return tree.buildPath(selectedCategoryId);
   }, [selectedCategoryId, tree]);
 
-  // 선택된 책의 현재 분류 경로
+  // 현재 자동 선택된 책 정보
   const selectedBookRow = useMemo(() => {
     if (!book) return null;
     return bookMeta.find((x) => x.book === book) || null;
   }, [book, bookMeta]);
+
+  // ✅ 현재 상태 요약 (책 리스트 UI 제거)
+  const statusSummary = useMemo(() => {
+    const total = bookMeta.length || 0;
+    const shown = filteredBooks.length;
+    const cat = selectedCategoryId ? selectedCategoryPath : "전체";
+    const search = (bookSearch || "").trim();
+    const only = onlyCategorized ? "ON" : "OFF";
+    return { total, shown, cat, search, only };
+  }, [bookMeta.length, filteredBooks.length, selectedCategoryId, selectedCategoryPath, bookSearch, onlyCategorized]);
 
   return (
     <StudentShell>
       <div className="vh-100 centered with-safe" style={{ width: "100%" }}>
         <div className="student-container">
           <div className="student-card stack">
-
             {/* 상단: 새로고침 */}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
               <button
@@ -491,18 +496,27 @@ export default function BookRangePage({ mode = "practice" }) {
                 inputMode="text"
                 autoCapitalize="none"
               />
-              <div style={{ marginTop: 6, fontSize: 12, color: "#888" }}>
-                표시 책 수: {filteredBooks.length} / 전체: {bookMeta.length || 0}
+              <div style={{ marginTop: 6, fontSize: 12, color: "#888", wordBreak: "keep-all" }}>
+                표시 책 수: {statusSummary.shown} / 전체: {statusSummary.total}
+                {statusSummary.search ? ` · 검색: "${statusSummary.search}"` : ""}
               </div>
             </div>
 
             {/* ✅ 2) 분류로 찾기 (트리) */}
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #ffe3ee" }}>
-              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-end",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  flexWrap: "wrap",
+                }}
+              >
                 <div>
                   <div style={{ fontWeight: 900, color: "#1f2a44" }}>분류로 찾기</div>
                   <div style={{ fontSize: 12, color: "#5d6b82", marginTop: 4 }}>
-                    * 아래 트리에서 <b>선택가능(leaf)</b> 뱃지가 있는 항목만 선택됩니다.
+                    * 트리에서 <b>선택가능(leaf)</b> 뱃지가 있는 항목만 선택됩니다.
                   </div>
                 </div>
 
@@ -565,100 +579,25 @@ export default function BookRangePage({ mode = "practice" }) {
               </div>
             </div>
 
-            {/* ✅ 책 목록 (드롭다운 대신 클릭 선택) */}
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 900, color: "#1f2a44" }}>책 선택</div>
-              <div style={{ fontSize: 12, color: "#5d6b82", marginTop: 4 }}>
-                아래 목록에서 책을 클릭하면 선택됩니다.
-              </div>
+            {/* ✅ (삭제됨) 책 선택 리스트/드롭다운 UI */}
+            {/* - 이제 책은 [검색/분류 필터 결과의 첫 번째]로 자동 선택됩니다. */}
 
-              <div
-                style={{
-                  marginTop: 10,
-                  maxHeight: 230,
-                  overflow: "auto",
-                  border: "1px solid #ffe3ee",
-                  borderRadius: 12,
-                  background: "#fff",
-                }}
-              >
-                {loadingBooks ? (
-                  <div style={{ padding: 12, fontSize: 13, color: "#5d6b82" }}>불러오는 중…</div>
-                ) : filteredBookMeta.length === 0 ? (
-                  <div style={{ padding: 12, fontSize: 13, color: "#5d6b82" }}>
-                    (조건에 맞는 단어책이 없습니다)
-                  </div>
-                ) : (
-                  filteredBookMeta.map((row) => {
-                    const on = row.book === book;
-                    const path = row.category_path || "미분류";
-                    return (
-                      <div
-                        key={row.book}
-                        onClick={() => setBook(row.book)}
-                        title={row.book}
-                        style={{
-                          padding: "10px 12px",
-                          borderBottom: "1px solid #fff0f6",
-                          cursor: "pointer",
-                          background: on ? "#fff0f6" : "#fff",
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          gap: 10,
-                        }}
-                      >
-                        <div style={{ minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontWeight: 900,
-                              color: "#1f2a44",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {row.book}
-                          </div>
-                          <div style={{ fontSize: 12, color: "#5d6b82", marginTop: 2 }}>
-                            {path}
-                          </div>
-                        </div>
-                        {on && (
-                          <div
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 900,
-                              color: "#ff3b8d",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            선택됨
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
+            {/* ✅ 현재 자동 선택된 책 표시 */}
+            <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 12, background: "#fff0f6", border: "1px solid #ffe3ee" }}>
+              <div style={{ fontSize: 12, color: "#5d6b82" }}>현재 선택 책(자동)</div>
+              <div style={{ marginTop: 4, fontWeight: 900, color: "#1f2a44", wordBreak: "keep-all" }}>
+                {book ? book : "(조건에 맞는 책이 없습니다)"}
               </div>
-
               {book && (
-                <div style={{ marginTop: 8, fontSize: 12, color: "#444", wordBreak: "keep-all" }}>
-                  현재 선택 책: <b style={{ color: "#1f2a44" }}>{book}</b>
-                  {selectedBookRow?.category_path ? (
-                    <span style={{ marginLeft: 8, color: "#5d6b82" }}>
-                      ({selectedBookRow.category_path})
-                    </span>
-                  ) : null}
+                <div style={{ marginTop: 4, fontSize: 12, color: "#5d6b82", wordBreak: "keep-all" }}>
+                  {selectedBookRow?.category_path ? selectedBookRow.category_path : "미분류"}
                 </div>
               )}
             </div>
 
             {/* ✅ 3) 챕터란 (맨 아래) */}
             <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #ffe3ee" }}>
-              <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>
-                챕터 (콤마/범위 입력 가능)
-              </div>
+              <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>챕터 (콤마/범위 입력 가능)</div>
               <input
                 className="student-field"
                 style={fieldStyle}
@@ -670,7 +609,7 @@ export default function BookRangePage({ mode = "practice" }) {
               />
 
               <div style={{ fontSize: 12, color: "#888", marginTop: 8, wordBreak: "keep-all" }}>
-유효 챕터: {chapters.join(", ") || (loadingChapters ? "불러오는 중…" : "없음")}
+                유효 챕터: {chapters.join(", ") || (loadingChapters ? "불러오는 중…" : "없음")}
                 <br />
                 예시 입력: <code>4-8</code>, <code>1, 3, 5</code>, <code>2-4, 7, 9-10</code>
                 <br />
@@ -698,18 +637,13 @@ export default function BookRangePage({ mode = "practice" }) {
                     className="button-lg"
                     onClick={goMock}
                     disabled={btnDisabled}
-                    style={{
-                      background: "#fff",
-                      color: "#ff6fa3",
-                      border: "2px solid #ff8fb7",
-                    }}
+                    style={{ background: "#fff", color: "#ff6fa3", border: "2px solid #ff8fb7" }}
                   >
                     연습하기 → 모의시험(6초)
                   </button>
                 </>
               )}
             </div>
-
           </div>
         </div>
       </div>
