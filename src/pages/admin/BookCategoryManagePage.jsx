@@ -3,6 +3,18 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../utils/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
+/**
+ * ✅ 변경점
+ * 1) 소분류(leaf) 아래에도 무한(무제한 depth)으로 하위 분류 추가 가능
+ *    - 기존: 대(0) -> 중(1) -> 소(2)까지만 UI 제공
+ *    - 변경: 어떤 노드든 "하위 추가" 가능 (트리 깊이 제한 없음)
+ *
+ * 2) 트리를 더 가시적으로:
+ *    - 들여쓰기 + 왼쪽 세로 가이드라인(트리선) + 접기/펼치기
+ *    - depth 뱃지(0,1,2...) 표시
+ *    - 각 노드에: [접기/펼치기] [이름수정] [하위추가] [↑↓] [삭제]
+ */
+
 const styles = {
   page: { minHeight: "100vh", background: "#fff5f8", padding: 16 },
   wrap: { maxWidth: 1100, margin: "0 auto" },
@@ -54,24 +66,37 @@ const styles = {
     cursor: "pointer",
   },
 
-  // ✅ 여기서 글자색/배경/호버가 확실히 보이도록 보강
   small: {
     padding: "7px 10px",
     borderRadius: 10,
     border: "1px solid #ffd6e5",
     background: "#ffffff",
-    color: "#1f2a44",              // ✅ 글자색 명시
+    color: "#1f2a44",
     cursor: "pointer",
     fontWeight: 900,
     lineHeight: 1,
-    minWidth: 40,                   // ✅ 너무 작아져서 안 보이는 느낌 방지
+    minWidth: 44,
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     boxShadow: "0 1px 0 rgba(0,0,0,0.03)",
   },
 
-  // 삭제 버튼은 눈에 띄게(연빨강)
+  smallPink: {
+    padding: "7px 10px",
+    borderRadius: 10,
+    border: "1px solid #ffb3c8",
+    background: "#fff0f6",
+    color: "#8a1f4b",
+    cursor: "pointer",
+    fontWeight: 900,
+    lineHeight: 1,
+    minWidth: 64,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   smallDanger: {
     padding: "7px 10px",
     borderRadius: 10,
@@ -98,18 +123,53 @@ const styles = {
     border: "1px solid #ffd6e5",
   },
 
-  node: (lvl) => ({
+  depthTag: {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    background: "#f3f6ff",
+    color: "#1f2a44",
+    border: "1px solid #dfe7ff",
+    fontWeight: 900,
+    fontSize: 11,
+  },
+
+  // 트리용 컨테이너
+  treeWrap: { marginTop: 14 },
+
+  // 노드 라인: 들여쓰기 + 가이드라인
+  nodeRow: (depth) => ({
+    position: "relative",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     padding: "10px 12px",
     borderRadius: 12,
     border: "1px solid #ffe3ee",
-    background: lvl === 0 ? "#fff" : lvl === 1 ? "#fff8fb" : "#fffbfd",
+    background: depth === 0 ? "#fff" : depth === 1 ? "#fff8fb" : "#fffbfd",
     marginTop: 8,
-    marginLeft: lvl * 18,
+    marginLeft: depth * 18,
     gap: 10,
   }),
+
+  // 왼쪽 트리 가이드라인 (depth가 있을 때만)
+  guide: (depth) => ({
+    position: "absolute",
+    left: -10,
+    top: 0,
+    bottom: 0,
+    width: 10,
+    borderLeft: depth > 0 ? "2px solid #ffe3ee" : "none",
+  }),
+
+  // 노드 왼쪽 "분기점" 표시
+  elbow: {
+    width: 10,
+    height: 10,
+    borderLeft: "2px solid #ffe3ee",
+    borderBottom: "2px solid #ffe3ee",
+    marginRight: 6,
+  },
 };
 
 function normalizeSort(rows) {
@@ -130,36 +190,56 @@ function normalizeSort(rows) {
   return rows;
 }
 
+// depth 계산 + children map 만들기
+function buildTreeHelpers(rows) {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const childrenBy = new Map();
+  for (const r of rows) {
+    const k = r.parent_id || "__root__";
+    if (!childrenBy.has(k)) childrenBy.set(k, []);
+    childrenBy.get(k).push(r);
+  }
+  for (const [, arr] of childrenBy.entries()) {
+    arr.sort(
+      (a, b) =>
+        (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+        (a.name || "").localeCompare(b.name || "")
+    );
+  }
+
+  const depthMemo = new Map();
+  const getDepth = (id) => {
+    if (!id) return 0;
+    if (depthMemo.has(id)) return depthMemo.get(id);
+    const n = byId.get(id);
+    if (!n) return 0;
+    const d = n.parent_id ? getDepth(n.parent_id) + 1 : 0;
+    depthMemo.set(id, d);
+    return d;
+  };
+
+  const roots = childrenBy.get("__root__") || [];
+  const hasChild = (id) => (childrenBy.get(id) || []).length > 0;
+
+  return { byId, childrenBy, roots, getDepth, hasChild };
+}
+
 export default function BookCategoryManagePage() {
   const nav = useNavigate();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
 
+  // 루트 추가 입력
   const [newRoot, setNewRoot] = useState("");
-  const [newMidBy, setNewMidBy] = useState({});
-  const [newLeafBy, setNewLeafBy] = useState({});
 
-  const tree = useMemo(() => {
-    const byParent = new Map();
-    for (const r of rows) {
-      const k = r.parent_id || "__root__";
-      if (!byParent.has(k)) byParent.set(k, []);
-      byParent.get(k).push(r);
-    }
-    const sortArr = (a) =>
-      [...a].sort(
-        (x, y) =>
-          (x.sort_order ?? 0) - (y.sort_order ?? 0) ||
-          (x.name || "").localeCompare(y.name || "")
-      );
+  // ✅ 어떤 노드든 "하위 추가" 입력값을 관리 (key = parentId)
+  const [newChildBy, setNewChildBy] = useState({}); // { [parentId]: text }
 
-    const roots = sortArr(byParent.get("__root__") || []);
-    const mids = (pid) => sortArr(byParent.get(pid) || []);
-    const leafs = (pid) => sortArr(byParent.get(pid) || []);
+  // ✅ 접기/펼치기 (key = nodeId, true면 접힘)
+  const [collapsed, setCollapsed] = useState({});
 
-    return { roots, mids, leafs };
-  }, [rows]);
+  const helpers = useMemo(() => buildTreeHelpers(rows), [rows]);
 
   async function load() {
     try {
@@ -199,6 +279,10 @@ export default function BookCategoryManagePage() {
       sort_order: next,
     });
     if (error) throw error;
+
+    // 새로 만든 부모는 펼침 상태로 두기
+    if (parentId) setCollapsed((p) => ({ ...p, [parentId]: false }));
+
     await load();
   }
 
@@ -243,14 +327,136 @@ export default function BookCategoryManagePage() {
     await load();
   }
 
+  function toggleCollapse(id) {
+    setCollapsed((p) => ({ ...p, [id]: !p[id] }));
+  }
+
+  // ✅ 재귀 렌더: depth 무제한
+  const renderNode = (nodeId, depth, parentKey) => {
+    const node = helpers.byId.get(nodeId);
+    if (!node) return null;
+
+    const children = helpers.childrenBy.get(node.id) || [];
+    const hasKids = children.length > 0;
+    const isCollapsed = !!collapsed[node.id];
+
+    // parentKey는 newChildBy에 넣을 key: (노드id)
+    const addKey = node.id;
+
+    return (
+      <div key={node.id}>
+        <div style={styles.nodeRow(depth)}>
+          <div style={styles.guide(depth)} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            {depth > 0 && <span style={styles.elbow} />}
+
+            {/* 접기/펼치기 */}
+            {hasKids ? (
+              <button
+                style={styles.small}
+                onClick={() => toggleCollapse(node.id)}
+                title={isCollapsed ? "펼치기" : "접기"}
+              >
+                {isCollapsed ? "▶" : "▼"}
+              </button>
+            ) : (
+              <span style={{ width: 44 }} /> // 자리 맞춤
+            )}
+
+            <span style={styles.depthTag}>depth {depth}</span>
+            <strong
+              style={{
+                color: "#1f2a44",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: 520,
+              }}
+              title={node.name}
+            >
+              {node.name}
+            </strong>
+
+            <button
+              style={styles.small}
+              onClick={() => {
+                const nm = prompt("이름 수정", node.name);
+                if (nm !== null) renameNode(node.id, nm).catch((e) => setErr(e?.message || String(e)));
+              }}
+            >
+              이름
+            </button>
+          </div>
+
+          <div style={styles.row}>
+            <button
+              style={styles.small}
+              onClick={() => moveUpDown(node, "up").catch((e) => setErr(e?.message || String(e)))}
+              title="위로"
+            >
+              ↑
+            </button>
+            <button
+              style={styles.small}
+              onClick={() => moveUpDown(node, "down").catch((e) => setErr(e?.message || String(e)))}
+              title="아래로"
+            >
+              ↓
+            </button>
+
+            <button
+              style={styles.smallDanger}
+              onClick={() => {
+                if (confirm("이 분류를 삭제할까요? (하위도 함께 삭제)")) {
+                  deleteNode(node.id).catch((e) => setErr(e?.message || String(e)));
+                }
+              }}
+              title="삭제"
+            >
+              🗑 삭제
+            </button>
+          </div>
+        </div>
+
+        {/* ✅ 하위 추가 (어떤 depth든 가능) */}
+        <div style={{ ...styles.row, marginLeft: depth * 18 + 18, marginTop: 6 }}>
+          <input
+            style={styles.input}
+            value={newChildBy[addKey] || ""}
+            onChange={(e) => setNewChildBy((p) => ({ ...p, [addKey]: e.target.value }))}
+            placeholder="하위 분류 추가 (예: 세부 항목...)"
+          />
+          <button
+            style={styles.smallPink}
+            onClick={async () => {
+              try {
+                setErr("");
+                await createNode({ parentId: addKey, name: newChildBy[addKey] || "" });
+                setNewChildBy((p) => ({ ...p, [addKey]: "" }));
+              } catch (e) {
+                setErr(e?.message || String(e));
+              }
+            }}
+          >
+            + 하위 추가
+          </button>
+        </div>
+
+        {/* 자식 렌더 */}
+        {!isCollapsed &&
+          children.map((c) => renderNode(c.id, depth + 1, node.id))}
+      </div>
+    );
+  };
+
   return (
     <div style={styles.page}>
       <div style={styles.wrap}>
         <div style={styles.head}>
           <div>
-            <div style={styles.title}>단어책 분류 관리 (대/중/소)</div>
+            <div style={styles.title}>단어책 분류 관리 (무한 트리)</div>
             <div style={{ color: "#5d6b82", fontSize: 13, marginTop: 4 }}>
-              대분류 → 중분류 → 소분류(leaf) 구조로 책을 정리합니다.
+              ✅ 어떤 분류 아래든 하위 분류를 계속 추가할 수 있어요. (depth 무제한)
             </div>
           </div>
           <div style={styles.row}>
@@ -266,20 +472,39 @@ export default function BookCategoryManagePage() {
         {err && (
           <div style={{ ...styles.card, borderColor: "#ffb3c8", marginBottom: 12 }}>
             <div style={{ color: "#b42318", fontWeight: 900 }}>에러</div>
-            <div style={{ color: "#b42318", marginTop: 6, whiteSpace: "pre-wrap" }}>
-              {err}
-            </div>
+            <div style={{ color: "#b42318", marginTop: 6, whiteSpace: "pre-wrap" }}>{err}</div>
           </div>
         )}
 
         <div style={styles.card}>
           <div style={{ ...styles.row, justifyContent: "space-between" }}>
             <div style={{ fontWeight: 900, color: "#1f2a44" }}>
-              대분류 추가 <span style={{ marginLeft: 8, ...styles.tag }}>depth 0</span>
+              루트(대분류) 추가 <span style={{ marginLeft: 8, ...styles.tag }}>root</span>
             </div>
-            <button style={styles.btn2} onClick={load} disabled={loading}>
-              {loading ? "불러오는 중..." : "새로고침"}
-            </button>
+            <div style={styles.row}>
+              <button
+                style={styles.btn2}
+                onClick={() => setCollapsed({})}
+                title="전부 펼치기"
+              >
+                전부 펼치기
+              </button>
+              <button
+                style={styles.btn2}
+                onClick={() => {
+                  // 루트는 남기고 하위는 접기
+                  const next = {};
+                  for (const r of helpers.roots) next[r.id] = true;
+                  setCollapsed(next);
+                }}
+                title="루트만 펼치고 하위 접기"
+              >
+                하위 접기
+              </button>
+              <button style={styles.btn2} onClick={load} disabled={loading}>
+                {loading ? "불러오는 중..." : "새로고침"}
+              </button>
+            </div>
           </div>
 
           <div style={{ ...styles.row, marginTop: 10 }}>
@@ -287,7 +512,7 @@ export default function BookCategoryManagePage() {
               style={styles.input}
               value={newRoot}
               onChange={(e) => setNewRoot(e.target.value)}
-              placeholder="예) 품사 / 문장 형식 / 구(Phrase) / 절(Clause) ..."
+              placeholder="예) 내신 / 수능 / 토익 / 초등 / 중등 ..."
             />
             <button
               style={styles.btn}
@@ -301,205 +526,16 @@ export default function BookCategoryManagePage() {
                 }
               }}
             >
-              + 대분류 추가
+              + 루트 추가
             </button>
           </div>
 
-          <div style={{ marginTop: 14 }}>
-            {tree.roots.length === 0 && (
-              <div style={{ color: "#5d6b82" }}>
-                아직 대분류가 없습니다. 위에서 추가해 주세요.
-              </div>
+          <div style={styles.treeWrap}>
+            {helpers.roots.length === 0 && (
+              <div style={{ color: "#5d6b82" }}>아직 루트 분류가 없습니다. 위에서 추가해 주세요.</div>
             )}
 
-            {tree.roots.map((r) => (
-              <div key={r.id}>
-                <div style={styles.node(0)}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                    <span style={styles.tag}>대</span>
-                    <strong style={{ color: "#1f2a44" }}>{r.name}</strong>
-                    <button
-                      style={styles.small}
-                      onClick={() => {
-                        const nm = prompt("대분류 이름 수정", r.name);
-                        if (nm !== null) renameNode(r.id, nm).catch((e) => setErr(e?.message || String(e)));
-                      }}
-                    >
-                      이름
-                    </button>
-                  </div>
-                  <div style={styles.row}>
-                    <button
-                      style={styles.small}
-                      onClick={() => moveUpDown(r, "up").catch((e) => setErr(e?.message || String(e)))}
-                      title="위로"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      style={styles.small}
-                      onClick={() => moveUpDown(r, "down").catch((e) => setErr(e?.message || String(e)))}
-                      title="아래로"
-                    >
-                      ↓
-                    </button>
-                    <button
-                      style={styles.smallDanger}
-                      onClick={() => {
-                        if (confirm("이 대분류를 삭제할까요? (중/소분류도 함께 삭제)")) {
-                          deleteNode(r.id).catch((e) => setErr(e?.message || String(e)));
-                        }
-                      }}
-                      title="삭제"
-                    >
-                      🗑 삭제
-                    </button>
-                  </div>
-                </div>
-
-                {/* 중분류 추가 */}
-                <div style={{ ...styles.row, marginLeft: 18, marginTop: 6 }}>
-                  <input
-                    style={styles.input}
-                    value={newMidBy[r.id] || ""}
-                    onChange={(e) => setNewMidBy((p) => ({ ...p, [r.id]: e.target.value }))}
-                    placeholder="중분류 추가 (예: 명사 / 동사 / to부정사구 ...)"
-                  />
-                  <button
-                    style={styles.btn2}
-                    onClick={async () => {
-                      try {
-                        setErr("");
-                        await createNode({ parentId: r.id, name: newMidBy[r.id] || "" });
-                        setNewMidBy((p) => ({ ...p, [r.id]: "" }));
-                      } catch (e) {
-                        setErr(e?.message || String(e));
-                      }
-                    }}
-                  >
-                    + 중분류
-                  </button>
-                </div>
-
-                {/* 중분류 목록 */}
-                {tree.mids(r.id).map((m) => (
-                  <div key={m.id}>
-                    <div style={styles.node(1)}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                        <span style={styles.tag}>중</span>
-                        <strong style={{ color: "#1f2a44" }}>{m.name}</strong>
-                        <button
-                          style={styles.small}
-                          onClick={() => {
-                            const nm = prompt("중분류 이름 수정", m.name);
-                            if (nm !== null) renameNode(m.id, nm).catch((e) => setErr(e?.message || String(e)));
-                          }}
-                        >
-                          이름
-                        </button>
-                      </div>
-                      <div style={styles.row}>
-                        <button
-                          style={styles.small}
-                          onClick={() => moveUpDown(m, "up").catch((e) => setErr(e?.message || String(e)))}
-                          title="위로"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          style={styles.small}
-                          onClick={() => moveUpDown(m, "down").catch((e) => setErr(e?.message || String(e)))}
-                          title="아래로"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          style={styles.smallDanger}
-                          onClick={() => {
-                            if (confirm("이 중분류를 삭제할까요? (소분류도 함께 삭제)")) {
-                              deleteNode(m.id).catch((e) => setErr(e?.message || String(e)));
-                            }
-                          }}
-                          title="삭제"
-                        >
-                          🗑 삭제
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* 소분류 추가 */}
-                    <div style={{ ...styles.row, marginLeft: 36, marginTop: 6 }}>
-                      <input
-                        style={styles.input}
-                        value={newLeafBy[m.id] || ""}
-                        onChange={(e) => setNewLeafBy((p) => ({ ...p, [m.id]: e.target.value }))}
-                        placeholder="소분류 추가 (예: 보통명사 / 재귀대명사 / 시간부사절 ...)"
-                      />
-                      <button
-                        style={styles.btn2}
-                        onClick={async () => {
-                          try {
-                            setErr("");
-                            await createNode({ parentId: m.id, name: newLeafBy[m.id] || "" });
-                            setNewLeafBy((p) => ({ ...p, [m.id]: "" }));
-                          } catch (e) {
-                            setErr(e?.message || String(e));
-                          }
-                        }}
-                      >
-                        + 소분류
-                      </button>
-                    </div>
-
-                    {/* 소분류 목록 */}
-                    {tree.leafs(m.id).map((s) => (
-                      <div key={s.id} style={styles.node(2)}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                          <span style={styles.tag}>소</span>
-                          <strong style={{ color: "#1f2a44" }}>{s.name}</strong>
-                          <button
-                            style={styles.small}
-                            onClick={() => {
-                              const nm = prompt("소분류 이름 수정", s.name);
-                              if (nm !== null) renameNode(s.id, nm).catch((e) => setErr(e?.message || String(e)));
-                            }}
-                          >
-                            이름
-                          </button>
-                        </div>
-                        <div style={styles.row}>
-                          <button
-                            style={styles.small}
-                            onClick={() => moveUpDown(s, "up").catch((e) => setErr(e?.message || String(e)))}
-                            title="위로"
-                          >
-                            ↑
-                          </button>
-                          <button
-                            style={styles.small}
-                            onClick={() => moveUpDown(s, "down").catch((e) => setErr(e?.message || String(e)))}
-                            title="아래로"
-                          >
-                            ↓
-                          </button>
-                          <button
-                            style={styles.smallDanger}
-                            onClick={() => {
-                              if (confirm("이 소분류를 삭제할까요?")) {
-                                deleteNode(s.id).catch((e) => setErr(e?.message || String(e)));
-                              }
-                            }}
-                            title="삭제"
-                          >
-                            🗑 삭제
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
+            {helpers.roots.map((r) => renderNode(r.id, 0, "__root__"))}
           </div>
         </div>
 
