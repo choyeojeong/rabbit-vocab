@@ -4,15 +4,11 @@ import { supabase } from "../../utils/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
 /**
- * ✅ 변경점
- * 1) 소분류(leaf) 아래에도 무한(무제한 depth)으로 하위 분류 추가 가능
- *    - 기존: 대(0) -> 중(1) -> 소(2)까지만 UI 제공
- *    - 변경: 어떤 노드든 "하위 추가" 가능 (트리 깊이 제한 없음)
- *
- * 2) 트리를 더 가시적으로:
- *    - 들여쓰기 + 왼쪽 세로 가이드라인(트리선) + 접기/펼치기
- *    - depth 뱃지(0,1,2...) 표시
- *    - 각 노드에: [접기/펼치기] [이름수정] [하위추가] [↑↓] [삭제]
+ * ✅ 수정사항
+ * - depth 표시 제거
+ * - "하위 분류 추가" 입력칸이 항상 보이지 않도록 변경:
+ *   → 각 노드에 [+ 하위] 버튼만 두고, 눌렀을 때만 해당 노드 아래에 입력칸이 펼쳐짐
+ * - 트리 가시성 유지: 들여쓰기 + 가이드라인 + 접기/펼치기 유지
  */
 
 const styles = {
@@ -123,21 +119,8 @@ const styles = {
     border: "1px solid #ffd6e5",
   },
 
-  depthTag: {
-    display: "inline-block",
-    padding: "4px 8px",
-    borderRadius: 999,
-    background: "#f3f6ff",
-    color: "#1f2a44",
-    border: "1px solid #dfe7ff",
-    fontWeight: 900,
-    fontSize: 11,
-  },
-
-  // 트리용 컨테이너
   treeWrap: { marginTop: 14 },
 
-  // 노드 라인: 들여쓰기 + 가이드라인
   nodeRow: (depth) => ({
     position: "relative",
     display: "flex",
@@ -152,7 +135,6 @@ const styles = {
     gap: 10,
   }),
 
-  // 왼쪽 트리 가이드라인 (depth가 있을 때만)
   guide: (depth) => ({
     position: "absolute",
     left: -10,
@@ -162,7 +144,6 @@ const styles = {
     borderLeft: depth > 0 ? "2px solid #ffe3ee" : "none",
   }),
 
-  // 노드 왼쪽 "분기점" 표시
   elbow: {
     width: 10,
     height: 10,
@@ -170,6 +151,17 @@ const styles = {
     borderBottom: "2px solid #ffe3ee",
     marginRight: 6,
   },
+
+  inlineEditor: (depth) => ({
+    marginLeft: depth * 18 + 18,
+    marginTop: 6,
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    flexWrap: "wrap",
+  }),
+
+  hint: { color: "#5d6b82", fontSize: 13, marginTop: 4 },
 };
 
 function normalizeSort(rows) {
@@ -190,7 +182,6 @@ function normalizeSort(rows) {
   return rows;
 }
 
-// depth 계산 + children map 만들기
 function buildTreeHelpers(rows) {
   const byId = new Map(rows.map((r) => [r.id, r]));
   const childrenBy = new Map();
@@ -206,22 +197,8 @@ function buildTreeHelpers(rows) {
         (a.name || "").localeCompare(b.name || "")
     );
   }
-
-  const depthMemo = new Map();
-  const getDepth = (id) => {
-    if (!id) return 0;
-    if (depthMemo.has(id)) return depthMemo.get(id);
-    const n = byId.get(id);
-    if (!n) return 0;
-    const d = n.parent_id ? getDepth(n.parent_id) + 1 : 0;
-    depthMemo.set(id, d);
-    return d;
-  };
-
   const roots = childrenBy.get("__root__") || [];
-  const hasChild = (id) => (childrenBy.get(id) || []).length > 0;
-
-  return { byId, childrenBy, roots, getDepth, hasChild };
+  return { byId, childrenBy, roots };
 }
 
 export default function BookCategoryManagePage() {
@@ -230,14 +207,14 @@ export default function BookCategoryManagePage() {
   const [rows, setRows] = useState([]);
   const [err, setErr] = useState("");
 
-  // 루트 추가 입력
   const [newRoot, setNewRoot] = useState("");
 
-  // ✅ 어떤 노드든 "하위 추가" 입력값을 관리 (key = parentId)
-  const [newChildBy, setNewChildBy] = useState({}); // { [parentId]: text }
+  // ✅ 하위 추가: "입력칸 펼침" 상태
+  const [addingFor, setAddingFor] = useState(null); // nodeId | null
+  const [newChildText, setNewChildText] = useState(""); // 현재 펼쳐진 입력칸의 텍스트
 
-  // ✅ 접기/펼치기 (key = nodeId, true면 접힘)
-  const [collapsed, setCollapsed] = useState({});
+  // ✅ 접기/펼치기
+  const [collapsed, setCollapsed] = useState({}); // { [nodeId]: true }
 
   const helpers = useMemo(() => buildTreeHelpers(rows), [rows]);
 
@@ -280,9 +257,7 @@ export default function BookCategoryManagePage() {
     });
     if (error) throw error;
 
-    // 새로 만든 부모는 펼침 상태로 두기
     if (parentId) setCollapsed((p) => ({ ...p, [parentId]: false }));
-
     await load();
   }
 
@@ -331,17 +306,29 @@ export default function BookCategoryManagePage() {
     setCollapsed((p) => ({ ...p, [id]: !p[id] }));
   }
 
-  // ✅ 재귀 렌더: depth 무제한
-  const renderNode = (nodeId, depth, parentKey) => {
+  function openAddChild(id) {
+    setAddingFor((cur) => (cur === id ? null : id));
+    setNewChildText("");
+    // 해당 노드 접혀있으면 펼치기
+    setCollapsed((p) => ({ ...p, [id]: false }));
+  }
+
+  async function submitAddChild(parentId) {
+    const nm = (newChildText || "").trim();
+    if (!nm) return;
+    await createNode({ parentId, name: nm });
+    setNewChildText("");
+    // 계속 같은 parent에 연속 추가할 수 있게 유지하려면 아래 유지
+    // setAddingFor(parentId);
+  }
+
+  const renderNode = (nodeId, depth) => {
     const node = helpers.byId.get(nodeId);
     if (!node) return null;
 
     const children = helpers.childrenBy.get(node.id) || [];
     const hasKids = children.length > 0;
     const isCollapsed = !!collapsed[node.id];
-
-    // parentKey는 newChildBy에 넣을 key: (노드id)
-    const addKey = node.id;
 
     return (
       <div key={node.id}>
@@ -360,17 +347,16 @@ export default function BookCategoryManagePage() {
                 {isCollapsed ? "▶" : "▼"}
               </button>
             ) : (
-              <span style={{ width: 44 }} /> // 자리 맞춤
+              <span style={{ width: 44 }} />
             )}
 
-            <span style={styles.depthTag}>depth {depth}</span>
             <strong
               style={{
                 color: "#1f2a44",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                maxWidth: 520,
+                maxWidth: 560,
               }}
               title={node.name}
             >
@@ -389,6 +375,14 @@ export default function BookCategoryManagePage() {
           </div>
 
           <div style={styles.row}>
+            <button
+              style={styles.smallPink}
+              onClick={() => openAddChild(node.id)}
+              title="하위 분류 추가"
+            >
+              + 하위
+            </button>
+
             <button
               style={styles.small}
               onClick={() => moveUpDown(node, "up").catch((e) => setErr(e?.message || String(e)))}
@@ -418,33 +412,45 @@ export default function BookCategoryManagePage() {
           </div>
         </div>
 
-        {/* ✅ 하위 추가 (어떤 depth든 가능) */}
-        <div style={{ ...styles.row, marginLeft: depth * 18 + 18, marginTop: 6 }}>
-          <input
-            style={styles.input}
-            value={newChildBy[addKey] || ""}
-            onChange={(e) => setNewChildBy((p) => ({ ...p, [addKey]: e.target.value }))}
-            placeholder="하위 분류 추가 (예: 세부 항목...)"
-          />
-          <button
-            style={styles.smallPink}
-            onClick={async () => {
-              try {
-                setErr("");
-                await createNode({ parentId: addKey, name: newChildBy[addKey] || "" });
-                setNewChildBy((p) => ({ ...p, [addKey]: "" }));
-              } catch (e) {
-                setErr(e?.message || String(e));
-              }
-            }}
-          >
-            + 하위 추가
-          </button>
-        </div>
+        {/* ✅ 하위 추가 입력칸: 선택된 노드에서만 펼쳐짐 */}
+        {addingFor === node.id && (
+          <div style={styles.inlineEditor(depth)}>
+            <input
+              style={styles.input}
+              value={newChildText}
+              onChange={(e) => setNewChildText(e.target.value)}
+              placeholder="하위 분류 이름 입력"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  submitAddChild(node.id).catch((err) => setErr(err?.message || String(err)));
+                } else if (e.key === "Escape") {
+                  setAddingFor(null);
+                  setNewChildText("");
+                }
+              }}
+              autoFocus
+            />
+            <button
+              style={styles.btn2}
+              onClick={() => submitAddChild(node.id).catch((err) => setErr(err?.message || String(err)))}
+            >
+              추가
+            </button>
+            <button
+              style={styles.btn2}
+              onClick={() => {
+                setAddingFor(null);
+                setNewChildText("");
+              }}
+            >
+              닫기
+            </button>
+            <div style={styles.hint}>Enter: 추가 / Esc: 닫기</div>
+          </div>
+        )}
 
         {/* 자식 렌더 */}
-        {!isCollapsed &&
-          children.map((c) => renderNode(c.id, depth + 1, node.id))}
+        {!isCollapsed && children.map((c) => renderNode(c.id, depth + 1))}
       </div>
     );
   };
@@ -456,7 +462,7 @@ export default function BookCategoryManagePage() {
           <div>
             <div style={styles.title}>단어책 분류 관리 (무한 트리)</div>
             <div style={{ color: "#5d6b82", fontSize: 13, marginTop: 4 }}>
-              ✅ 어떤 분류 아래든 하위 분류를 계속 추가할 수 있어요. (depth 무제한)
+              ✅ “+ 하위”를 눌렀을 때만 입력칸이 펼쳐져서 트리가 더 잘 보입니다.
             </div>
           </div>
           <div style={styles.row}>
@@ -479,20 +485,15 @@ export default function BookCategoryManagePage() {
         <div style={styles.card}>
           <div style={{ ...styles.row, justifyContent: "space-between" }}>
             <div style={{ fontWeight: 900, color: "#1f2a44" }}>
-              루트(대분류) 추가 <span style={{ marginLeft: 8, ...styles.tag }}>root</span>
+              루트(최상위) 추가 <span style={{ marginLeft: 8, ...styles.tag }}>root</span>
             </div>
             <div style={styles.row}>
-              <button
-                style={styles.btn2}
-                onClick={() => setCollapsed({})}
-                title="전부 펼치기"
-              >
+              <button style={styles.btn2} onClick={() => setCollapsed({})} title="전부 펼치기">
                 전부 펼치기
               </button>
               <button
                 style={styles.btn2}
                 onClick={() => {
-                  // 루트는 남기고 하위는 접기
                   const next = {};
                   for (const r of helpers.roots) next[r.id] = true;
                   setCollapsed(next);
@@ -513,6 +514,19 @@ export default function BookCategoryManagePage() {
               value={newRoot}
               onChange={(e) => setNewRoot(e.target.value)}
               placeholder="예) 내신 / 수능 / 토익 / 초등 / 중등 ..."
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  (async () => {
+                    try {
+                      setErr("");
+                      await createNode({ parentId: null, name: newRoot });
+                      setNewRoot("");
+                    } catch (er) {
+                      setErr(er?.message || String(er));
+                    }
+                  })();
+                }
+              }}
             />
             <button
               style={styles.btn}
@@ -535,7 +549,7 @@ export default function BookCategoryManagePage() {
               <div style={{ color: "#5d6b82" }}>아직 루트 분류가 없습니다. 위에서 추가해 주세요.</div>
             )}
 
-            {helpers.roots.map((r) => renderNode(r.id, 0, "__root__"))}
+            {helpers.roots.map((r) => renderNode(r.id, 0))}
           </div>
         </div>
 
