@@ -8,38 +8,41 @@ import StudentShell from "./StudentShell";
 export default function BookRangePage({ mode = "practice" }) {
   const nav = useNavigate();
 
-  // ✅ 책 메타(뷰)
+  // ✅ 책 메타(뷰 기반)
   const [bookMeta, setBookMeta] = useState([]); // [{ book, category_id, category_path }]
   const [book, setBook] = useState("");
 
   // ✅ 분류 트리
   const [catNodes, setCatNodes] = useState([]); // [{id,parent_id,name,sort_order,created_at}]
-  const [selectedNodeId, setSelectedNodeId] = useState(""); // 선택한 분류(아무 depth 가능)
-  const [expanded, setExpanded] = useState(() => new Set()); // 펼침 상태(노드 id)
+  const [selectedCategoryId, setSelectedCategoryId] = useState(""); // leaf 선택
+  const [onlyCategorized, setOnlyCategorized] = useState(false); // 미분류 숨기기
+  const [bookSearch, setBookSearch] = useState(""); // 책 검색
   const [catSearch, setCatSearch] = useState(""); // 분류 검색(트리 필터)
-  const [bookSearch, setBookSearch] = useState(""); // 책 검색(책 목록 필터)
 
+  // ✅ 트리 펼침 상태(가시성)
+  const [expanded, setExpanded] = useState(() => new Set()); // node id Set
+
+  // ✅ 챕터
   const [chapters, setChapters] = useState([]); // [number]
   const [chapterInput, setChapterInput] = useState(""); // raw text
+
   const [loadingBooks, setLoadingBooks] = useState(true);
   const [loadingChapters, setLoadingChapters] = useState(false);
   const [err, setErr] = useState("");
 
   const isOfficial = mode === "official";
-
-  // 중복 호출 방지(포커스 이벤트 연타)
   const reloadingRef = useRef(false);
 
   // =========================
-  // 트리 인덱스/유틸
+  // 트리 유틸 (무한 depth)
   // =========================
   const tree = useMemo(() => {
     const byId = new Map(catNodes.map((n) => [n.id, n]));
-    const byParent = new Map(); // parent -> children[]
+    const childrenBy = new Map();
     for (const n of catNodes) {
       const k = n.parent_id || "__root__";
-      if (!byParent.has(k)) byParent.set(k, []);
-      byParent.get(k).push(n);
+      if (!childrenBy.has(k)) childrenBy.set(k, []);
+      childrenBy.get(k).push(n);
     }
 
     const sortArr = (arr) =>
@@ -49,13 +52,10 @@ export default function BookRangePage({ mode = "practice" }) {
           (a.name || "").localeCompare(b.name || "")
       );
 
-    // 정렬 적용
-    for (const [k, arr] of byParent.entries()) {
-      byParent.set(k, sortArr(arr));
-    }
+    // 정렬된 childrenBy
+    const getChildren = (pid) => sortArr(childrenBy.get(pid || "__root__") || []);
 
-    const roots = byParent.get("__root__") || [];
-
+    // leaf 판정(자식 없음)
     const hasChild = new Set(catNodes.filter((x) => x.parent_id).map((x) => x.parent_id));
     const isLeaf = (id) => !hasChild.has(id);
 
@@ -69,52 +69,47 @@ export default function BookRangePage({ mode = "practice" }) {
       return parts.reverse().join(" > ");
     };
 
-    // ✅ 선택 노드 아래의 "leaf id들"을 전부 수집
-    const collectLeafIds = (startId) => {
-      if (!startId) return [];
-      const out = [];
-      const stack = [startId];
-      const seen = new Set();
-
-      while (stack.length) {
-        const id = stack.pop();
-        if (!id || seen.has(id)) continue;
-        seen.add(id);
-
-        const children = byParent.get(id) || [];
-        if (!children.length) {
-          // 자식이 없으면 leaf
-          out.push(id);
-        } else {
-          for (const c of children) stack.push(c.id);
-        }
-      }
-      return out;
-    };
-
-    // ✅ 루트 기준으로 자동 펼치기(초기 UX)
-    const defaultExpanded = () => {
-      // 루트는 펼친 상태로
-      const s = new Set();
-      for (const r of roots) s.add(r.id);
-      return s;
-    };
-
-    return {
-      byId,
-      byParent,
-      roots,
-      isLeaf,
-      buildPath,
-      collectLeafIds,
-      defaultExpanded,
-    };
+    return { byId, getChildren, isLeaf, buildPath };
   }, [catNodes]);
 
+  // 선택된 leaf 기준으로 "해당 leaf + 모든 하위 leaf" 같은 개념은 필요 없음
+  // (매핑은 leaf에만 붙는다고 가정. leaf가 아닌 노드 선택을 막습니다.)
+
   // =========================
-  // ✅ 로드: 책+분류 데이터
+  // 책 목록 필터
   // =========================
-  async function reloadBooks({ keepSelection = true } = {}) {
+  const filteredBookMeta = useMemo(() => {
+    let list = Array.isArray(bookMeta) ? [...bookMeta] : [];
+
+    if (onlyCategorized) list = list.filter((x) => !!x.category_id);
+
+    // ✅ leaf 선택 시 해당 leaf에 매핑된 책만
+    if (selectedCategoryId) {
+      list = list.filter((x) => (x.category_id || "") === selectedCategoryId);
+    }
+
+    // 책 검색
+    const q = (bookSearch || "").trim().toLowerCase();
+    if (q) list = list.filter((x) => (x.book || "").toLowerCase().includes(q));
+
+    // 정렬: 분류경로 -> 책이름
+    list.sort((a, b) => {
+      const pa = (a.category_path || "~~~미분류").toLowerCase();
+      const pb = (b.category_path || "~~~미분류").toLowerCase();
+      if (pa < pb) return -1;
+      if (pa > pb) return 1;
+      return (a.book || "").localeCompare(b.book || "");
+    });
+
+    return list;
+  }, [bookMeta, onlyCategorized, selectedCategoryId, bookSearch]);
+
+  const filteredBooks = useMemo(() => filteredBookMeta.map((x) => x.book), [filteredBookMeta]);
+
+  // =========================
+  // 데이터 로드
+  // =========================
+  async function reloadAll({ keepSelection = true } = {}) {
     if (reloadingRef.current) return;
     reloadingRef.current = true;
 
@@ -122,178 +117,76 @@ export default function BookRangePage({ mode = "practice" }) {
       setErr("");
       setLoadingBooks(true);
 
-      // 1) 분류 노드 로드
+      // 1) 분류 노드
       const { data: ns, error: ne } = await supabase
         .from("book_category_nodes")
         .select("id, parent_id, name, sort_order, created_at")
         .order("sort_order", { ascending: true })
         .order("created_at", { ascending: true });
 
-      if (ne) throw ne;
-      setCatNodes(Array.isArray(ns) ? ns : []);
+      if (!ne && Array.isArray(ns)) setCatNodes(ns);
+      else setCatNodes([]);
 
-      // 2) 책+분류(뷰) 로드
+      // 2) 책 + 분류
       const { data: vw, error: ve } = await supabase
         .from("v_books_with_category")
         .select("book, category_id, category_path");
 
-      if (ve) throw ve;
-
-      // ✅ 분류 기반 UI이므로 "미분류는 기본 제외"
-      const list = (vw || []).filter((x) => !!x.book);
-
-      setBookMeta(list);
-
-      // 선택된 book 유지/보정(일단 전체에서)
-      if (keepSelection) {
-        if (book && list.some((x) => x.book === book)) {
-          // 유지
-        } else {
-          const first = list.find((x) => x.book && x.category_id)?.book || list[0]?.book || "";
-          setBook(first || "");
+      if (!ve && Array.isArray(vw) && vw.length) {
+        setBookMeta(vw);
+        // 선택된 책 보정은 아래 useEffect에서 filteredBooks 기준으로 처리
+        if (!keepSelection) {
+          const first = vw.map((x) => x.book).find(Boolean) || "";
+          setBook(first);
         }
       } else {
-        const first = list.find((x) => x.book && x.category_id)?.book || list[0]?.book || "";
-        setBook(first || "");
-      }
-
-      // ✅ 처음 진입 시: 루트 자동 펼침
-      setExpanded((prev) => {
-        if (prev && prev.size) return prev;
-        return tree.defaultExpanded();
-      });
-    } catch (e) {
-      console.error(e);
-      // 폴백: 기존 방식(단, 이 경우 분류 UI가 의미가 없으니 안내)
-      try {
+        // 폴백: 기존 방식
         const bs = await fetchBooks();
         setBookMeta((bs || []).map((b) => ({ book: b, category_id: null, category_path: null })));
-        if (!keepSelection) setBook(bs?.[0] || "");
-        setErr(
-          (e?.message || "단어책/분류 데이터를 불러오지 못했습니다.") +
-            "\n(분류 테이블/뷰가 아직 없거나 권한 문제가 있을 수 있어요.)"
-        );
-      } catch {
-        setBookMeta([]);
-        setBook("");
-        setErr(e?.message || "단어책/분류 데이터를 불러오지 못했습니다.");
+        if (!keepSelection) setBook((bs && bs[0]) || "");
       }
+    } catch (e) {
+      console.error(e);
+      setErr(e?.message || "단어책 목록을 불러오지 못했습니다.");
+      setCatNodes([]);
+      setBookMeta([]);
+      setBook("");
     } finally {
       setLoadingBooks(false);
       reloadingRef.current = false;
     }
   }
 
-  // 최초 로드
   useEffect(() => {
-    reloadBooks({ keepSelection: false });
+    reloadAll({ keepSelection: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 포커스 시 갱신
+  // 앱 포커스 복귀 시 동기화
   useEffect(() => {
-    const onFocus = () => reloadBooks({ keepSelection: true });
+    const onFocus = () => reloadAll({ keepSelection: true });
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book]);
+  }, []);
 
-  // =========================
-  // ✅ 분류 트리 검색: 노드/조상/자손 가시화
-  // - 검색어가 있으면, 매칭 노드 + 그 조상 + 자손만 보여주기
-  // =========================
-  const visibleNodeIds = useMemo(() => {
-    const q = (catSearch || "").trim().toLowerCase();
-    if (!q) return null; // null이면 전체 표시
-
-    const byId = tree.byId;
-    const byParent = tree.byParent;
-
-    const matchIds = new Set();
-    for (const n of catNodes) {
-      if ((n.name || "").toLowerCase().includes(q)) matchIds.add(n.id);
-    }
-
-    const addAncestors = (id, set) => {
-      let cur = byId.get(id);
-      while (cur && cur.parent_id) {
-        set.add(cur.parent_id);
-        cur = byId.get(cur.parent_id);
-      }
-    };
-
-    const addDescendants = (id, set) => {
-      const stack = [id];
-      const seen = new Set();
-      while (stack.length) {
-        const x = stack.pop();
-        if (!x || seen.has(x)) continue;
-        seen.add(x);
-        set.add(x);
-        const kids = byParent.get(x) || [];
-        for (const k of kids) stack.push(k.id);
-      }
-    };
-
-    const vis = new Set();
-    for (const id of matchIds) {
-      vis.add(id);
-      addAncestors(id, vis);
-      addDescendants(id, vis);
-    }
-    return vis;
-  }, [catSearch, catNodes, tree]);
-
-  // =========================
-  // ✅ 책 목록 필터
-  // - "분류로 찾기" 강제이므로 미분류는 항상 숨김
-  // - 선택한 노드(어떤 depth든) 아래 leaf들에 매핑된 책만
-  // - 책 검색 적용
-  // =========================
-  const filteredBookMeta = useMemo(() => {
-    let list = Array.isArray(bookMeta) ? [...bookMeta] : [];
-
-    // ✅ 미분류는 학생에게 안 보이게(항상 숨김)
-    list = list.filter((x) => !!x.category_id);
-
-    // 선택된 분류가 있으면 그 하위 leaf로 필터
-    if (selectedNodeId) {
-      const leafIds = tree.collectLeafIds(selectedNodeId);
-      const leafSet = new Set(leafIds);
-      list = list.filter((x) => x.category_id && leafSet.has(x.category_id));
-    }
-
-    // 책 검색
-    const q = (bookSearch || "").trim().toLowerCase();
-    if (q) list = list.filter((x) => (x.book || "").toLowerCase().includes(q));
-
-    // 정렬: 경로 -> 책이름
-    list.sort((a, b) => {
-      const pa = (a.category_path || "").toLowerCase();
-      const pb = (b.category_path || "").toLowerCase();
-      if (pa < pb) return -1;
-      if (pa > pb) return 1;
-      return (a.book || "").localeCompare(b.book || "");
-    });
-
-    return list;
-  }, [bookMeta, selectedNodeId, bookSearch, tree]);
-
-  const filteredBooks = useMemo(() => filteredBookMeta.map((x) => x.book), [filteredBookMeta]);
-
-  // 필터 결과에 맞춰 book 보정
+  // 필터 결과에 맞춰 선택 book 보정
   useEffect(() => {
     if (loadingBooks) return;
+
     if (!filteredBooks.length) {
       if (book) setBook("");
       return;
     }
-    if (!book || !filteredBooks.includes(book)) setBook(filteredBooks[0]);
+
+    if (!book || !filteredBooks.includes(book)) {
+      setBook(filteredBooks[0]);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingBooks, filteredBooks.join("|")]);
 
   // =========================
-  // 챕터 로드
+  // book 바뀌면 chapters 로드
   // =========================
   useEffect(() => {
     if (!book) {
@@ -312,6 +205,7 @@ export default function BookRangePage({ mode = "practice" }) {
 
         setChapters(cs);
 
+        // 기본 범위 자동 채움 (처음만)
         if (!chapterInput && cs.length) {
           const first = cs[0];
           const last = cs[cs.length - 1];
@@ -334,7 +228,7 @@ export default function BookRangePage({ mode = "practice" }) {
   }, [book]);
 
   // =========================
-  // 시험/연습 이동
+  // 챕터 검증/이동
   // =========================
   const requestedChapters = useMemo(() => parseChapterInput(chapterInput), [chapterInput]);
 
@@ -389,125 +283,192 @@ export default function BookRangePage({ mode = "practice" }) {
 
   // =========================
   // 트리 UI (무한 depth)
+  // - leaf만 선택 가능
+  // - 검색(catSearch) 시, 매칭되는 노드/조상만 보이도록
   // =========================
+  const catFilter = useMemo(() => {
+    const q = (catSearch || "").trim().toLowerCase();
+    if (!q) return null;
+
+    // 검색어 매칭되는 노드 + 그 조상들을 visible로
+    const visible = new Set();
+    const matched = catNodes.filter((n) => (n.name || "").toLowerCase().includes(q));
+
+    const byId = tree.byId;
+    for (const m of matched) {
+      let cur = m;
+      while (cur) {
+        visible.add(cur.id);
+        cur = cur.parent_id ? byId.get(cur.parent_id) : null;
+      }
+    }
+    return { q, visible };
+  }, [catSearch, catNodes, tree.byId]);
+
   function toggleExpand(id) {
     setExpanded((prev) => {
-      const next = new Set(prev || []);
+      const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
   }
 
-  function pickNode(id) {
-    setSelectedNodeId((prev) => (prev === id ? "" : id));
-    // 선택 시, 해당 노드 자동 펼침(찾기 편하게)
+  function ensureExpandPathTo(id) {
+    // 선택/검색 시 조상 자동 펼침
+    const byId = tree.byId;
+    const toOpen = [];
+    let cur = byId.get(id);
+    while (cur && cur.parent_id) {
+      toOpen.push(cur.parent_id);
+      cur = byId.get(cur.parent_id);
+    }
+    if (!toOpen.length) return;
     setExpanded((prev) => {
-      const next = new Set(prev || []);
-      next.add(id);
+      const next = new Set(prev);
+      toOpen.forEach((x) => next.add(x));
       return next;
     });
   }
 
-  function renderNode(id, depth = 0) {
-    const node = tree.byId.get(id);
-    if (!node) return null;
+  function onPickLeaf(id) {
+    if (!tree.isLeaf(id)) {
+      // non-leaf는 펼침만
+      toggleExpand(id);
+      return;
+    }
+    setSelectedCategoryId((p) => (p === id ? "" : id));
+    ensureExpandPathTo(id);
+  }
 
-    // 검색 시 가시성 필터
-    if (visibleNodeIds && !visibleNodeIds.has(id)) return null;
+  // 검색 시 matched 조상 자동 펼침
+  useEffect(() => {
+    if (!catFilter?.visible) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const id of catFilter.visible) next.add(id);
+      return next;
+    });
+  }, [catFilter]);
 
-    const children = tree.byParent.get(id) || [];
-    const hasKids = children.length > 0;
-    const isOpen = expanded.has(id);
-
-    const active = selectedNodeId === id;
+  // 트리 렌더
+  function renderTree(parentId = null, level = 0) {
+    const children = tree.getChildren(parentId);
+    if (!children.length) return null;
 
     return (
-      <div key={id} style={{ marginTop: 6 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 10px",
-            borderRadius: 12,
-            border: active ? "1px solid #ff6fa3" : "1px solid #ffe3ee",
-            background: active ? "rgba(255,111,163,0.10)" : "#fff",
-            marginLeft: depth * 14,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => (hasKids ? toggleExpand(id) : pickNode(id))}
-            title={hasKids ? (isOpen ? "접기" : "펼치기") : "선택"}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 10,
-              border: "1px solid #ffd6e5",
-              background: "#fff",
-              color: "#1f2a44",
-              fontWeight: 900,
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {hasKids ? (isOpen ? "▾" : "▸") : "•"}
-          </button>
+      <div style={{ marginLeft: level ? 12 : 0 }}>
+        {children.map((n) => {
+          const kids = tree.getChildren(n.id);
+          const hasKids = kids.length > 0;
+          const leaf = tree.isLeaf(n.id);
 
-          <button
-            type="button"
-            onClick={() => pickNode(id)}
-            style={{
-              flex: 1,
-              textAlign: "left",
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              color: "#1f2a44",
-              fontWeight: 900,
-              padding: 0,
-              minWidth: 0,
-            }}
-            title={tree.buildPath(id)}
-          >
-            <span style={{ display: "inline-block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 320 }}>
-              {node.name}
-            </span>
-            <span style={{ marginLeft: 8, fontSize: 12, color: "#5d6b82", fontWeight: 800 }}>
-              {tree.isLeaf(id) ? "leaf" : ""}
-            </span>
-          </button>
-        </div>
+          // 검색 필터가 있으면 visible에 포함된 것만
+          if (catFilter?.visible && !catFilter.visible.has(n.id)) return null;
 
-        {hasKids && isOpen && (
-          <div style={{ marginTop: 6 }}>
-            {children.map((c) => renderNode(c.id, depth + 1))}
-          </div>
-        )}
+          const isOn = selectedCategoryId === n.id;
+          const isOpen = expanded.has(n.id) || !!catFilter?.visible; // 검색 시는 펼침 느낌
+
+          return (
+            <div key={n.id} style={{ marginTop: 6 }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ffe3ee",
+                  background: isOn ? "#ff6fa3" : "#fff",
+                  color: isOn ? "#fff" : "#1f2a44",
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+                title={tree.buildPath(n.id)}
+                onClick={() => onPickLeaf(n.id)}
+              >
+                {hasKids ? (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleExpand(n.id);
+                    }}
+                    style={{
+                      width: 18,
+                      height: 18,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: 6,
+                      border: isOn ? "1px solid rgba(255,255,255,0.6)" : "1px solid #ffd6e5",
+                      background: isOn ? "rgba(255,255,255,0.18)" : "#fff",
+                      fontWeight: 900,
+                      lineHeight: 1,
+                    }}
+                    title={isOpen ? "접기" : "펼치기"}
+                  >
+                    {isOpen ? "▾" : "▸"}
+                  </span>
+                ) : (
+                  <span style={{ width: 18, textAlign: "center", opacity: isOn ? 0.9 : 0.5 }}>
+                    •
+                  </span>
+                )}
+
+                <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {n.name}
+                  </span>
+                  {leaf && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 900,
+                        padding: "3px 8px",
+                        borderRadius: 999,
+                        border: isOn ? "1px solid rgba(255,255,255,0.6)" : "1px solid #ffd6e5",
+                        background: isOn ? "rgba(255,255,255,0.18)" : "#fff",
+                        color: isOn ? "#fff" : "#8a1f4b",
+                      }}
+                    >
+                      선택가능
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {hasKids && isOpen && <div style={{ marginLeft: 18 }}>{renderTree(n.id, level + 1)}</div>}
+            </div>
+          );
+        })}
       </div>
     );
   }
 
-  const bookOptionLabel = (b) => {
-    const row = filteredBookMeta.find((x) => x.book === b);
-    const p = row?.category_path ? row.category_path : "";
-    return p ? `${p} · ${b}` : b;
-  };
+  // 선택된 카테고리 경로 표시
+  const selectedCategoryPath = useMemo(() => {
+    if (!selectedCategoryId) return "";
+    return tree.buildPath(selectedCategoryId);
+  }, [selectedCategoryId, tree]);
+
+  // 선택된 책의 현재 분류 경로
+  const selectedBookRow = useMemo(() => {
+    if (!book) return null;
+    return bookMeta.find((x) => x.book === book) || null;
+  }, [book, bookMeta]);
 
   return (
     <StudentShell>
       <div className="vh-100 centered with-safe" style={{ width: "100%" }}>
         <div className="student-container">
           <div className="student-card stack">
+
             {/* 상단: 새로고침 */}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
               <button
                 type="button"
                 className="student-button"
-                onClick={() => reloadBooks({ keepSelection: true })}
+                onClick={() => reloadAll({ keepSelection: true })}
                 disabled={loadingBooks}
                 style={{ padding: "8px 12px", whiteSpace: "nowrap" }}
                 title="단어책/분류 새로고침"
@@ -516,161 +477,210 @@ export default function BookRangePage({ mode = "practice" }) {
               </button>
             </div>
 
-            {err && <div style={{ marginTop: 8, color: "#d00", fontSize: 13, whiteSpace: "pre-wrap" }}>{err}</div>}
+            {err && <div style={{ marginTop: 8, color: "#d00", fontSize: 13 }}>{err}</div>}
 
-            {/* ✅ 분류 트리 + 책 검색 */}
-            <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "0.95fr 1.05fr", gap: 10 }}>
-                {/* 왼쪽: 분류 트리 */}
-                <div
-                  style={{
-                    border: "1px solid #ffd3e3",
-                    borderRadius: 12,
-                    padding: 10,
-                    background: "#fff",
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: "#444", marginBottom: 6, fontWeight: 800 }}>
-                    분류로 찾기 (항상)
-                  </div>
-
-                  <input
-                    className="student-field"
-                    style={{ ...fieldStyle, marginBottom: 8 }}
-                    value={catSearch}
-                    onChange={(e) => setCatSearch(e.target.value)}
-                    placeholder="분류 검색 (예: 품사, 명사, 관계사...)"
-                    inputMode="text"
-                    autoCapitalize="none"
-                  />
-
-                  <div style={{ fontSize: 12, color: "#888", marginBottom: 8 }}>
-                    선택됨:{" "}
-                    <b style={{ color: "#1f2a44" }}>
-                      {selectedNodeId ? tree.buildPath(selectedNodeId) : "전체(분류됨 책)"}
-                    </b>
-                  </div>
-
-                  <div style={{ maxHeight: 320, overflow: "auto", paddingRight: 4 }}>
-                    {tree.roots.length === 0 ? (
-                      <div style={{ fontSize: 13, color: "#5d6b82" }}>
-                        분류 트리가 아직 없습니다. (관리자에서 분류를 먼저 만들어 주세요)
-                      </div>
-                    ) : (
-                      tree.roots.map((r) => renderNode(r.id, 0))
-                    )}
-                  </div>
-
-                  <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button
-                      type="button"
-                      className="student-button"
-                      onClick={() => {
-                        setSelectedNodeId("");
-                        setCatSearch("");
-                      }}
-                      style={{ padding: "8px 12px" }}
-                    >
-                      전체 보기
-                    </button>
-                    <button
-                      type="button"
-                      className="student-button"
-                      onClick={() => {
-                        // 전부 펼치기(현재 로드된 노드 기준)
-                        setExpanded(new Set(catNodes.map((n) => n.id)));
-                      }}
-                      style={{ padding: "8px 12px" }}
-                      disabled={!catNodes.length}
-                    >
-                      모두 펼치기
-                    </button>
-                    <button
-                      type="button"
-                      className="student-button"
-                      onClick={() => setExpanded(tree.defaultExpanded())}
-                      style={{ padding: "8px 12px" }}
-                      disabled={!tree.roots.length}
-                    >
-                      접기(루트만)
-                    </button>
-                  </div>
-                </div>
-
-                {/* 오른쪽: 책 검색 */}
-                <div>
-                  <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>책 검색</div>
-                  <input
-                    className="student-field"
-                    style={fieldStyle}
-                    value={bookSearch}
-                    onChange={(e) => setBookSearch(e.target.value)}
-                    placeholder="예: 워드마스터, 수능, 능률..."
-                    inputMode="text"
-                    autoCapitalize="none"
-                  />
-                  <div style={{ marginTop: 6, fontSize: 12, color: "#888", wordBreak: "keep-all" }}>
-                    표시 책 수: {filteredBooks.length}
-                  </div>
-
-                  {/* 책 선택 */}
-                  <div style={{ marginTop: 10 }}>
-                    <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>단어책</div>
-                    <select
-                      className="student-field"
-                      value={book}
-                      onChange={(e) => setBook(e.target.value)}
-                      style={fieldStyle}
-                      disabled={loadingBooks}
-                    >
-                      {loadingBooks ? (
-                        <option value="" disabled>
-                          불러오는 중…
-                        </option>
-                      ) : filteredBooks.length === 0 ? (
-                        <option value="" disabled>
-                          (조건에 맞는 단어책이 없습니다)
-                        </option>
-                      ) : (
-                        filteredBooks.map((b) => (
-                          <option key={b} value={b}>
-                            {bookOptionLabel(b)}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-                </div>
+            {/* ✅ 1) 책 검색란 (맨 위) */}
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>책 검색</div>
+              <input
+                className="student-field"
+                style={fieldStyle}
+                value={bookSearch}
+                onChange={(e) => setBookSearch(e.target.value)}
+                placeholder="예: 워드마스터, 수능, 능률..."
+                inputMode="text"
+                autoCapitalize="none"
+              />
+              <div style={{ marginTop: 6, fontSize: 12, color: "#888" }}>
+                표시 책 수: {filteredBooks.length} / 전체: {bookMeta.length || 0}
               </div>
             </div>
 
-            {/* 챕터 입력 */}
-            <div className="student-row" style={{ marginTop: 10 }}>
-              <div>
-                <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>챕터 (콤마/범위 입력 가능)</div>
+            {/* ✅ 2) 분류로 찾기 (트리) */}
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #ffe3ee" }}>
+              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontWeight: 900, color: "#1f2a44" }}>분류로 찾기</div>
+                  <div style={{ fontSize: 12, color: "#5d6b82", marginTop: 4 }}>
+                    * 아래 트리에서 <b>선택가능(leaf)</b> 뱃지가 있는 항목만 선택됩니다.
+                  </div>
+                </div>
+
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}>
+                  <input
+                    type="checkbox"
+                    checked={onlyCategorized}
+                    onChange={(e) => setOnlyCategorized(e.target.checked)}
+                  />
+                  미분류 숨기기
+                </label>
+              </div>
+
+              <div style={{ marginTop: 10 }}>
                 <input
                   className="student-field"
                   style={fieldStyle}
-                  value={chapterInput}
-                  onChange={(e) => setChapterInput(e.target.value)}
-                  placeholder="예: 4-8, 10, 12"
+                  value={catSearch}
+                  onChange={(e) => setCatSearch(e.target.value)}
+                  placeholder="분류 검색 (예: 품사, 명사, 부사절...)"
                   inputMode="text"
                   autoCapitalize="none"
                 />
               </div>
+
+              {selectedCategoryId && (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#444", wordBreak: "keep-all" }}>
+                  선택된 분류: <b style={{ color: "#ff3b8d" }}>{selectedCategoryPath}</b>{" "}
+                  <button
+                    type="button"
+                    className="student-button"
+                    style={{ padding: "6px 10px", marginLeft: 8 }}
+                    onClick={() => setSelectedCategoryId("")}
+                  >
+                    선택 해제
+                  </button>
+                </div>
+              )}
+
+              <div
+                style={{
+                  marginTop: 10,
+                  maxHeight: 260,
+                  overflow: "auto",
+                  padding: 10,
+                  borderRadius: 12,
+                  border: "1px solid #ffe3ee",
+                  background: "#fff",
+                }}
+              >
+                {loadingBooks ? (
+                  <div style={{ fontSize: 13, color: "#5d6b82" }}>불러오는 중…</div>
+                ) : catNodes.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#5d6b82" }}>
+                    분류 트리가 없습니다. (관리자에서 분류를 먼저 만들어 주세요)
+                  </div>
+                ) : (
+                  renderTree(null, 0)
+                )}
+              </div>
             </div>
 
-            <div style={{ fontSize: 12, color: "#888", marginTop: 8, wordBreak: "keep-all" }}>
-              유효 챕터: {chapters.join(", ") || (loadingChapters ? "불러오는 중…" : "없음")}
-              <br />
-              예시 입력: <code>4-8</code>, <code>1, 3, 5</code>, <code>2-4, 7, 9-10</code>
-              <br />
-              선택됨: {requestedChapters.length ? requestedChapters.join(", ") : "없음"}
-              {chapters.length > 0 &&
-              requestedChapters.length > 0 &&
-              requestedChapters.length !== validRequested.length
-                ? ` → 유효: ${validRequested.join(", ") || "없음"}`
-                : ""}
+            {/* ✅ 책 목록 (드롭다운 대신 클릭 선택) */}
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontWeight: 900, color: "#1f2a44" }}>책 선택</div>
+              <div style={{ fontSize: 12, color: "#5d6b82", marginTop: 4 }}>
+                아래 목록에서 책을 클릭하면 선택됩니다.
+              </div>
+
+              <div
+                style={{
+                  marginTop: 10,
+                  maxHeight: 230,
+                  overflow: "auto",
+                  border: "1px solid #ffe3ee",
+                  borderRadius: 12,
+                  background: "#fff",
+                }}
+              >
+                {loadingBooks ? (
+                  <div style={{ padding: 12, fontSize: 13, color: "#5d6b82" }}>불러오는 중…</div>
+                ) : filteredBookMeta.length === 0 ? (
+                  <div style={{ padding: 12, fontSize: 13, color: "#5d6b82" }}>
+                    (조건에 맞는 단어책이 없습니다)
+                  </div>
+                ) : (
+                  filteredBookMeta.map((row) => {
+                    const on = row.book === book;
+                    const path = row.category_path || "미분류";
+                    return (
+                      <div
+                        key={row.book}
+                        onClick={() => setBook(row.book)}
+                        title={row.book}
+                        style={{
+                          padding: "10px 12px",
+                          borderBottom: "1px solid #fff0f6",
+                          cursor: "pointer",
+                          background: on ? "#fff0f6" : "#fff",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontWeight: 900,
+                              color: "#1f2a44",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {row.book}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#5d6b82", marginTop: 2 }}>
+                            {path}
+                          </div>
+                        </div>
+                        {on && (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 900,
+                              color: "#ff3b8d",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            선택됨
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {book && (
+                <div style={{ marginTop: 8, fontSize: 12, color: "#444", wordBreak: "keep-all" }}>
+                  현재 선택 책: <b style={{ color: "#1f2a44" }}>{book}</b>
+                  {selectedBookRow?.category_path ? (
+                    <span style={{ marginLeft: 8, color: "#5d6b82" }}>
+                      ({selectedBookRow.category_path})
+                    </span>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            {/* ✅ 3) 챕터란 (맨 아래) */}
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #ffe3ee" }}>
+              <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>
+                챕터 (콤마/범위 입력 가능)
+              </div>
+              <input
+                className="student-field"
+                style={fieldStyle}
+                value={chapterInput}
+                onChange={(e) => setChapterInput(e.target.value)}
+                placeholder="예: 4-8, 10, 12"
+                inputMode="text"
+                autoCapitalize="none"
+              />
+
+              <div style={{ fontSize: 12, color: "#888", marginTop: 8, wordBreak: "keep-all" }}>
+유효 챕터: {chapters.join(", ") || (loadingChapters ? "불러오는 중…" : "없음")}
+                <br />
+                예시 입력: <code>4-8</code>, <code>1, 3, 5</code>, <code>2-4, 7, 9-10</code>
+                <br />
+                선택됨: {requestedChapters.length ? requestedChapters.join(", ") : "없음"}
+                {chapters.length > 0 &&
+                requestedChapters.length > 0 &&
+                requestedChapters.length !== validRequested.length
+                  ? ` → 유효: ${validRequested.join(", ") || "없음"}`
+                  : ""}
+              </div>
             </div>
 
             {/* 버튼 */}
@@ -688,13 +698,18 @@ export default function BookRangePage({ mode = "practice" }) {
                     className="button-lg"
                     onClick={goMock}
                     disabled={btnDisabled}
-                    style={{ background: "#fff", color: "#ff6fa3", border: "2px solid #ff8fb7" }}
+                    style={{
+                      background: "#fff",
+                      color: "#ff6fa3",
+                      border: "2px solid #ff8fb7",
+                    }}
                   >
                     연습하기 → 모의시험(6초)
                   </button>
                 </>
               )}
             </div>
+
           </div>
         </div>
       </div>
