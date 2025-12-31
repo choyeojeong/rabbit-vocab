@@ -1,60 +1,52 @@
-// src/pages/BookRangePage.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchBooks, fetchChapters, parseChapterInput } from "../utils/vocab";
+import { fetchChapters, parseChapterInput } from "../utils/vocab";
 import { supabase } from "../utils/supabaseClient";
 import StudentShell from "./StudentShell";
 
 export default function BookRangePage({ mode = "practice" }) {
   const nav = useNavigate();
+  const isOfficial = mode === "official";
 
-  // ✅ 책 메타(뷰 기반)
-  const [bookMeta, setBookMeta] = useState([]); // [{ book, category_id, category_path }]
-  const [book, setBook] = useState("");
+  /* =========================
+     상태
+  ========================= */
+  const [bookMeta, setBookMeta] = useState([]); // { book, category_id, category_path }
+  const [catNodes, setCatNodes] = useState([]);
 
-  // ✅ 분류 트리
-  const [catNodes, setCatNodes] = useState([]); // [{id,parent_id,name,sort_order,created_at}]
-  const [selectedCategoryId, setSelectedCategoryId] = useState(""); // leaf 선택
-  const [onlyCategorized, setOnlyCategorized] = useState(false); // 미분류 숨기기
-  const [bookSearch, setBookSearch] = useState(""); // 책 검색
-  const [catSearch, setCatSearch] = useState(""); // 분류 검색(트리 필터)
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [catSearch, setCatSearch] = useState("");
+  const [expanded, setExpanded] = useState(() => new Set());
 
-  // ✅ 트리 펼침 상태(가시성)
-  const [expanded, setExpanded] = useState(() => new Set()); // node id Set
+  // ⭐ 여러 책 선택 + 책별 챕터
+  const [selectedBooks, setSelectedBooks] = useState(() => new Set());
+  const [chaptersByBook, setChaptersByBook] = useState({}); // book -> chapterInput
+  const [chapterOptions, setChapterOptions] = useState({}); // book -> [chapters]
 
-  // ✅ 챕터
-  const [chapters, setChapters] = useState([]); // [number]
-  const [chapterInput, setChapterInput] = useState(""); // raw text
-
-  const [loadingBooks, setLoadingBooks] = useState(true);
-  const [loadingChapters, setLoadingChapters] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const isOfficial = mode === "official";
   const reloadingRef = useRef(false);
 
-  // =========================
-  // 트리 유틸 (무한 depth)
-  // =========================
+  /* =========================
+     분류 트리 유틸
+  ========================= */
   const tree = useMemo(() => {
     const byId = new Map(catNodes.map((n) => [n.id, n]));
     const childrenBy = new Map();
+
     for (const n of catNodes) {
       const k = n.parent_id || "__root__";
       if (!childrenBy.has(k)) childrenBy.set(k, []);
       childrenBy.get(k).push(n);
     }
 
-    const sortArr = (arr) =>
-      [...(arr || [])].sort(
-        (a, b) =>
-          (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
-          (a.name || "").localeCompare(b.name || "")
+    const getChildren = (pid) =>
+      (childrenBy.get(pid || "__root__") || []).sort((a, b) =>
+        (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+        (a.name || "").localeCompare(b.name || "")
       );
 
-    const getChildren = (pid) => sortArr(childrenBy.get(pid || "__root__") || []);
-
-    // leaf 판정(자식 없음)
     const hasChild = new Set(catNodes.filter((x) => x.parent_id).map((x) => x.parent_id));
     const isLeaf = (id) => !hasChild.has(id);
 
@@ -71,370 +63,161 @@ export default function BookRangePage({ mode = "practice" }) {
     return { byId, getChildren, isLeaf, buildPath };
   }, [catNodes]);
 
-  // =========================
-  // 책 목록 필터
-  // =========================
-  const filteredBookMeta = useMemo(() => {
-    let list = Array.isArray(bookMeta) ? [...bookMeta] : [];
-
-    if (onlyCategorized) list = list.filter((x) => !!x.category_id);
-
-    // ✅ leaf 선택 시 해당 leaf에 매핑된 책만
-    if (selectedCategoryId) {
-      list = list.filter((x) => (x.category_id || "") === selectedCategoryId);
-    }
-
-    // 책 검색
-    const q = (bookSearch || "").trim().toLowerCase();
-    if (q) list = list.filter((x) => (x.book || "").toLowerCase().includes(q));
-
-    // 정렬: 분류경로 -> 책이름
-    list.sort((a, b) => {
-      const pa = (a.category_path || "~~~미분류").toLowerCase();
-      const pb = (b.category_path || "~~~미분류").toLowerCase();
-      if (pa < pb) return -1;
-      if (pa > pb) return 1;
-      return (a.book || "").localeCompare(b.book || "");
-    });
-
-    return list;
-  }, [bookMeta, onlyCategorized, selectedCategoryId, bookSearch]);
-
-  const filteredBooks = useMemo(
-    () => filteredBookMeta.map((x) => x.book).filter(Boolean),
-    [filteredBookMeta]
-  );
-
-  // =========================
-  // 데이터 로드
-  // =========================
-  async function reloadAll({ keepSelection = true } = {}) {
+  /* =========================
+     데이터 로드
+  ========================= */
+  async function reloadAll() {
     if (reloadingRef.current) return;
     reloadingRef.current = true;
 
     try {
       setErr("");
-      setLoadingBooks(true);
+      setLoading(true);
 
-      // 1) 분류 노드
-      const { data: ns, error: ne } = await supabase
+      const { data: cats } = await supabase
         .from("book_category_nodes")
-        .select("id, parent_id, name, sort_order, created_at")
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: true });
+        .select("id, parent_id, name, sort_order, created_at");
 
-      if (!ne && Array.isArray(ns)) setCatNodes(ns);
-      else setCatNodes([]);
+      setCatNodes(cats || []);
 
-      // 2) 책 + 분류
-      const { data: vw, error: ve } = await supabase
+      const { data: books } = await supabase
         .from("v_books_with_category")
         .select("book, category_id, category_path");
 
-      if (!ve && Array.isArray(vw) && vw.length) {
-        setBookMeta(vw);
-        if (!keepSelection) {
-          const first = vw.map((x) => x.book).find(Boolean) || "";
-          setBook(first);
-        }
-      } else {
-        // 폴백: 기존 방식
-        const bs = await fetchBooks();
-        setBookMeta((bs || []).map((b) => ({ book: b, category_id: null, category_path: null })));
-        if (!keepSelection) setBook((bs && bs[0]) || "");
-      }
+      setBookMeta(books || []);
     } catch (e) {
       console.error(e);
-      setErr(e?.message || "단어책 목록을 불러오지 못했습니다.");
-      setCatNodes([]);
-      setBookMeta([]);
-      setBook("");
+      setErr("단어책/분류 데이터를 불러오지 못했습니다.");
     } finally {
-      setLoadingBooks(false);
+      setLoading(false);
       reloadingRef.current = false;
     }
   }
 
   useEffect(() => {
-    reloadAll({ keepSelection: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    reloadAll();
   }, []);
 
-  // 앱 포커스 복귀 시 동기화
-  useEffect(() => {
-    const onFocus = () => reloadAll({ keepSelection: true });
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ✅ 필터 결과에 맞춰 선택 book 보정 (드롭다운/리스트 없이 자동으로 첫 번째 책 선택)
-  useEffect(() => {
-    if (loadingBooks) return;
-
-    if (!filteredBooks.length) {
-      if (book) setBook("");
-      return;
-    }
-    if (!book || !filteredBooks.includes(book)) {
-      setBook(filteredBooks[0]);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingBooks, filteredBooks.join("|")]);
-
-  // =========================
-  // book 바뀌면 chapters 로드
-  // =========================
-  useEffect(() => {
-    if (!book) {
-      setChapters([]);
-      return;
-    }
-
-    let alive = true;
-    (async () => {
-      try {
-        setErr("");
-        setLoadingChapters(true);
-
-        const cs = await fetchChapters(book);
-        if (!alive) return;
-
-        setChapters(cs);
-
-        // 기본 범위 자동 채움 (처음만)
-        if (!chapterInput && cs.length) {
-          const first = cs[0];
-          const last = cs[cs.length - 1];
-          setChapterInput(`${first}-${last}`);
-        }
-      } catch (e) {
-        console.error(e);
-        if (!alive) return;
-        setErr(e?.message || "챕터 목록을 불러오지 못했습니다.");
-        setChapters([]);
-      } finally {
-        if (alive) setLoadingChapters(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book]);
-
-  // =========================
-  // 챕터 검증/이동
-  // =========================
-  const requestedChapters = useMemo(() => parseChapterInput(chapterInput), [chapterInput]);
-
-  const validRequested = useMemo(() => {
-    if (!chapters?.length) return requestedChapters;
-    const set = new Set(chapters);
-    return requestedChapters.filter((n) => set.has(n));
-  }, [requestedChapters, chapters]);
-
-  function guardAndGetChapters() {
-    if (!book) {
-      alert("단어책이 선택되지 않았습니다. (검색/분류 조건을 확인해 주세요)");
-      return null;
-    }
-    if (!chapterInput.trim()) {
-      alert("챕터 입력을 확인해 주세요.");
-      return null;
-    }
-    if (!requestedChapters.length) {
-      alert("올바른 챕터 형식이 아닙니다. 예) 4-8, 10, 12");
-      return null;
-    }
-    if (chapters.length && validRequested.length === 0) {
-      alert("선택한 책에 존재하는 챕터가 아닙니다. 유효한 챕터로 다시 입력해 주세요.");
-      return null;
-    }
-    return validRequested.length ? validRequested : requestedChapters;
-  }
-
-  function goMCQ() {
-    const list = guardAndGetChapters();
-    if (!list) return;
-    const query = `book=${encodeURIComponent(book)}&chapters=${encodeURIComponent(chapterInput)}`;
-    nav(`/practice/mcq?${query}`, { state: { mode: "practice", book, chapters: list } });
-  }
-
-  function goMock() {
-    const list = guardAndGetChapters();
-    if (!list) return;
-    const query = `book=${encodeURIComponent(book)}&chapters=${encodeURIComponent(chapterInput)}`;
-    nav(`/practice/mock?${query}`, { state: { mode: "practice", book, chapters: list } });
-  }
-
-  function goOfficial() {
-    const list = guardAndGetChapters();
-    if (!list) return;
-    const query = `book=${encodeURIComponent(book)}&chapters=${encodeURIComponent(chapterInput)}`;
-    nav(`/exam/official?${query}`, { state: { mode: "official", book, chapters: list } });
-  }
-
-  const btnDisabled = loadingBooks || loadingChapters || !book || !chapterInput.trim();
-
-  // =========================
-  // 트리 UI (무한 depth)
-  // - leaf만 선택 가능
-  // - 검색(catSearch) 시, 매칭되는 노드/조상만 보이도록
-  // =========================
-  const catFilter = useMemo(() => {
-    const q = (catSearch || "").trim().toLowerCase();
-    if (!q) return null;
-
-    const visible = new Set();
-    const matched = catNodes.filter((n) => (n.name || "").toLowerCase().includes(q));
-
-    const byId = tree.byId;
-    for (const m of matched) {
-      let cur = m;
-      while (cur) {
-        visible.add(cur.id);
-        cur = cur.parent_id ? byId.get(cur.parent_id) : null;
-      }
-    }
-    return { q, visible };
-  }, [catSearch, catNodes, tree.byId]);
-
+  /* =========================
+     분류 선택
+  ========================= */
   function toggleExpand(id) {
     setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
     });
   }
 
-  function ensureExpandPathTo(id) {
-    const byId = tree.byId;
-    const toOpen = [];
-    let cur = byId.get(id);
-    while (cur && cur.parent_id) {
-      toOpen.push(cur.parent_id);
-      cur = byId.get(cur.parent_id);
-    }
-    if (!toOpen.length) return;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      toOpen.forEach((x) => next.add(x));
-      return next;
-    });
-  }
-
-  function onPickLeaf(id) {
+  function onPickCategory(id) {
     if (!tree.isLeaf(id)) {
       toggleExpand(id);
       return;
     }
     setSelectedCategoryId((p) => (p === id ? "" : id));
-    ensureExpandPathTo(id);
   }
 
-  // 검색 시 조상 자동 펼침
-  useEffect(() => {
-    if (!catFilter?.visible) return;
-    setExpanded((prev) => {
+  /* =========================
+     분류별 책 목록
+  ========================= */
+  const booksInCategory = useMemo(() => {
+    if (!selectedCategoryId) return [];
+    return bookMeta.filter((b) => b.category_id === selectedCategoryId);
+  }, [bookMeta, selectedCategoryId]);
+
+  /* =========================
+     책 선택 / 해제
+  ========================= */
+  async function toggleBook(book) {
+    setSelectedBooks((prev) => {
       const next = new Set(prev);
-      for (const id of catFilter.visible) next.add(id);
+      if (next.has(book)) {
+        next.delete(book);
+      } else {
+        next.add(book);
+      }
       return next;
     });
-  }, [catFilter]);
 
-  function renderTree(parentId = null, level = 0) {
-    const children = tree.getChildren(parentId);
-    if (!children.length) return null;
+    // 처음 선택 시 챕터 로드
+    if (!chapterOptions[book]) {
+      const cs = await fetchChapters(book);
+      setChapterOptions((m) => ({ ...m, [book]: cs }));
+      if (cs?.length) {
+        setChaptersByBook((m) => ({
+          ...m,
+          [book]: `${cs[0]}-${cs[cs.length - 1]}`,
+        }));
+      }
+    }
+  }
+
+  /* =========================
+     이동 (A안)
+  ========================= */
+  function buildSelections() {
+    const selections = [];
+
+    for (const book of selectedBooks) {
+      const text = chaptersByBook[book];
+      if (!text) {
+        alert(`${book}의 챕터 범위를 입력해 주세요.`);
+        return null;
+      }
+      const parsed = parseChapterInput(text);
+      if (!parsed.length) {
+        alert(`${book}의 챕터 형식이 올바르지 않습니다.`);
+        return null;
+      }
+      selections.push({ book, chaptersText: text });
+    }
+
+    if (!selections.length) {
+      alert("최소 한 권 이상의 책을 선택해 주세요.");
+      return null;
+    }
+
+    return selections;
+  }
+
+  function go(path) {
+    const selections = buildSelections();
+    if (!selections) return;
+    nav(path, { state: { mode, selections } });
+  }
+
+  /* =========================
+     트리 렌더
+  ========================= */
+  function renderTree(parentId = null) {
+    const nodes = tree.getChildren(parentId);
+    if (!nodes.length) return null;
 
     return (
-      <div style={{ marginLeft: level ? 12 : 0 }}>
-        {children.map((n) => {
-          const kids = tree.getChildren(n.id);
-          const hasKids = kids.length > 0;
+      <div style={{ marginLeft: parentId ? 16 : 0 }}>
+        {nodes.map((n) => {
+          const open = expanded.has(n.id);
           const leaf = tree.isLeaf(n.id);
-
-          if (catFilter?.visible && !catFilter.visible.has(n.id)) return null;
-
-          const isOn = selectedCategoryId === n.id;
-          const isOpen = expanded.has(n.id) || !!catFilter?.visible;
+          const on = selectedCategoryId === n.id;
 
           return (
             <div key={n.id} style={{ marginTop: 6 }}>
               <div
+                onClick={() => onPickCategory(n.id)}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
                   padding: "8px 10px",
                   borderRadius: 10,
-                  border: "1px solid #ffe3ee",
-                  background: isOn ? "#ff6fa3" : "#fff",
-                  color: isOn ? "#fff" : "#1f2a44",
+                  border: "1px solid #ffd3e3",
+                  background: on ? "#ff6fa3" : "#fff",
+                  color: on ? "#fff" : "#1f2a44",
                   cursor: "pointer",
-                  userSelect: "none",
+                  fontWeight: 900,
                 }}
                 title={tree.buildPath(n.id)}
-                onClick={() => onPickLeaf(n.id)}
               >
-                {hasKids ? (
-                  <span
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleExpand(n.id);
-                    }}
-                    style={{
-                      width: 18,
-                      height: 18,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      borderRadius: 6,
-                      border: isOn ? "1px solid rgba(255,255,255,0.6)" : "1px solid #ffd6e5",
-                      background: isOn ? "rgba(255,255,255,0.18)" : "#fff",
-                      fontWeight: 900,
-                      lineHeight: 1,
-                    }}
-                    title={isOpen ? "접기" : "펼치기"}
-                  >
-                    {isOpen ? "▾" : "▸"}
-                  </span>
-                ) : (
-                  <span style={{ width: 18, textAlign: "center", opacity: isOn ? 0.9 : 0.5 }}>•</span>
-                )}
-
-                <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                  <span
-                    style={{
-                      fontWeight: 900,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {n.name}
-                  </span>
-                  {leaf && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 900,
-                        padding: "3px 8px",
-                        borderRadius: 999,
-                        border: isOn ? "1px solid rgba(255,255,255,0.6)" : "1px solid #ffd6e5",
-                        background: isOn ? "rgba(255,255,255,0.18)" : "#fff",
-                        color: isOn ? "#fff" : "#8a1f4b",
-                      }}
-                    >
-                      선택가능
-                    </span>
-                  )}
-                </div>
+                {leaf ? "📘 " : "📂 "} {n.name}
               </div>
-
-              {hasKids && isOpen && <div style={{ marginLeft: 18 }}>{renderTree(n.id, level + 1)}</div>}
+              {!leaf && open && renderTree(n.id)}
             </div>
           );
         })}
@@ -442,209 +225,75 @@ export default function BookRangePage({ mode = "practice" }) {
     );
   }
 
-  const selectedCategoryPath = useMemo(() => {
-    if (!selectedCategoryId) return "";
-    return tree.buildPath(selectedCategoryId);
-  }, [selectedCategoryId, tree]);
-
-  // 현재 자동 선택된 책 정보
-  const selectedBookRow = useMemo(() => {
-    if (!book) return null;
-    return bookMeta.find((x) => x.book === book) || null;
-  }, [book, bookMeta]);
-
-  // ✅ 현재 상태 요약 (책 리스트 UI 제거)
-  const statusSummary = useMemo(() => {
-    const total = bookMeta.length || 0;
-    const shown = filteredBooks.length;
-    const cat = selectedCategoryId ? selectedCategoryPath : "전체";
-    const search = (bookSearch || "").trim();
-    const only = onlyCategorized ? "ON" : "OFF";
-    return { total, shown, cat, search, only };
-  }, [bookMeta.length, filteredBooks.length, selectedCategoryId, selectedCategoryPath, bookSearch, onlyCategorized]);
-
   return (
     <StudentShell>
-      <div className="vh-100 centered with-safe" style={{ width: "100%" }}>
-        <div className="student-container">
-          <div className="student-card stack">
-            {/* 상단: 새로고침 */}
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="student-button"
-                onClick={() => reloadAll({ keepSelection: true })}
-                disabled={loadingBooks}
-                style={{ padding: "8px 12px", whiteSpace: "nowrap" }}
-                title="단어책/분류 새로고침"
-              >
-                ⟳ 새로고침
-              </button>
-            </div>
+      <div className="student-container">
+        <div className="student-card stack">
 
-            {err && <div style={{ marginTop: 8, color: "#d00", fontSize: 13 }}>{err}</div>}
+          {err && <div style={{ color: "#d00" }}>{err}</div>}
 
-            {/* ✅ 1) 책 검색란 (맨 위) */}
-            <div style={{ marginTop: 10 }}>
-              <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>책 검색</div>
-              <input
-                className="student-field"
-                style={fieldStyle}
-                value={bookSearch}
-                onChange={(e) => setBookSearch(e.target.value)}
-                placeholder="예: 워드마스터, 수능, 능률..."
-                inputMode="text"
-                autoCapitalize="none"
-              />
-              <div style={{ marginTop: 6, fontSize: 12, color: "#888", wordBreak: "keep-all" }}>
-                표시 책 수: {statusSummary.shown} / 전체: {statusSummary.total}
-                {statusSummary.search ? ` · 검색: "${statusSummary.search}"` : ""}
-              </div>
-            </div>
-
-            {/* ✅ 2) 분류로 찾기 (트리) */}
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #ffe3ee" }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "flex-end",
-                  justifyContent: "space-between",
-                  gap: 10,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 900, color: "#1f2a44" }}>분류로 찾기</div>
-                  <div style={{ fontSize: 12, color: "#5d6b82", marginTop: 4 }}>
-                    * 트리에서 <b>선택가능(leaf)</b> 뱃지가 있는 항목만 선택됩니다.
-                  </div>
-                </div>
-
-                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#444" }}>
-                  <input
-                    type="checkbox"
-                    checked={onlyCategorized}
-                    onChange={(e) => setOnlyCategorized(e.target.checked)}
-                  />
-                  미분류 숨기기
-                </label>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <input
-                  className="student-field"
-                  style={fieldStyle}
-                  value={catSearch}
-                  onChange={(e) => setCatSearch(e.target.value)}
-                  placeholder="분류 검색 (예: 품사, 명사, 부사절...)"
-                  inputMode="text"
-                  autoCapitalize="none"
-                />
-              </div>
-
-              {selectedCategoryId && (
-                <div style={{ marginTop: 8, fontSize: 12, color: "#444", wordBreak: "keep-all" }}>
-                  선택된 분류: <b style={{ color: "#ff3b8d" }}>{selectedCategoryPath}</b>{" "}
-                  <button
-                    type="button"
-                    className="student-button"
-                    style={{ padding: "6px 10px", marginLeft: 8 }}
-                    onClick={() => setSelectedCategoryId("")}
-                  >
-                    선택 해제
-                  </button>
-                </div>
-              )}
-
-              <div
-                style={{
-                  marginTop: 10,
-                  maxHeight: 260,
-                  overflow: "auto",
-                  padding: 10,
-                  borderRadius: 12,
-                  border: "1px solid #ffe3ee",
-                  background: "#fff",
-                }}
-              >
-                {loadingBooks ? (
-                  <div style={{ fontSize: 13, color: "#5d6b82" }}>불러오는 중…</div>
-                ) : catNodes.length === 0 ? (
-                  <div style={{ fontSize: 13, color: "#5d6b82" }}>
-                    분류 트리가 없습니다. (관리자에서 분류를 먼저 만들어 주세요)
-                  </div>
-                ) : (
-                  renderTree(null, 0)
-                )}
-              </div>
-            </div>
-
-            {/* ✅ (삭제됨) 책 선택 리스트/드롭다운 UI */}
-            {/* - 이제 책은 [검색/분류 필터 결과의 첫 번째]로 자동 선택됩니다. */}
-
-            {/* ✅ 현재 자동 선택된 책 표시 */}
-            <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 12, background: "#fff0f6", border: "1px solid #ffe3ee" }}>
-              <div style={{ fontSize: 12, color: "#5d6b82" }}>현재 선택 책(자동)</div>
-              <div style={{ marginTop: 4, fontWeight: 900, color: "#1f2a44", wordBreak: "keep-all" }}>
-                {book ? book : "(조건에 맞는 책이 없습니다)"}
-              </div>
-              {book && (
-                <div style={{ marginTop: 4, fontSize: 12, color: "#5d6b82", wordBreak: "keep-all" }}>
-                  {selectedBookRow?.category_path ? selectedBookRow.category_path : "미분류"}
-                </div>
-              )}
-            </div>
-
-            {/* ✅ 3) 챕터란 (맨 아래) */}
-            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #ffe3ee" }}>
-              <div style={{ fontSize: 12, color: "#444", marginBottom: 6 }}>챕터 (콤마/범위 입력 가능)</div>
-              <input
-                className="student-field"
-                style={fieldStyle}
-                value={chapterInput}
-                onChange={(e) => setChapterInput(e.target.value)}
-                placeholder="예: 4-8, 10, 12"
-                inputMode="text"
-                autoCapitalize="none"
-              />
-
-              <div style={{ fontSize: 12, color: "#888", marginTop: 8, wordBreak: "keep-all" }}>
-                유효 챕터: {chapters.join(", ") || (loadingChapters ? "불러오는 중…" : "없음")}
-                <br />
-                예시 입력: <code>4-8</code>, <code>1, 3, 5</code>, <code>2-4, 7, 9-10</code>
-                <br />
-                선택됨: {requestedChapters.length ? requestedChapters.join(", ") : "없음"}
-                {chapters.length > 0 &&
-                requestedChapters.length > 0 &&
-                requestedChapters.length !== validRequested.length
-                  ? ` → 유효: ${validRequested.join(", ") || "없음"}`
-                  : ""}
-              </div>
-            </div>
-
-            {/* 버튼 */}
-            <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-              {isOfficial ? (
-                <button className="button-lg" onClick={goOfficial} disabled={btnDisabled}>
-                  시험보기(공식)
-                </button>
-              ) : (
-                <>
-                  <button className="button-lg" onClick={goMCQ} disabled={btnDisabled}>
-                    연습하기 → 객관식
-                  </button>
-                  <button
-                    className="button-lg"
-                    onClick={goMock}
-                    disabled={btnDisabled}
-                    style={{ background: "#fff", color: "#ff6fa3", border: "2px solid #ff8fb7" }}
-                  >
-                    연습하기 → 모의시험(6초)
-                  </button>
-                </>
-              )}
-            </div>
+          <h3>분류 선택</h3>
+          <div style={{ maxHeight: 260, overflow: "auto" }}>
+            {loading ? "불러오는 중…" : renderTree(null)}
           </div>
+
+          {selectedCategoryId && (
+            <>
+              <h3 style={{ marginTop: 16 }}>책 선택 + 챕터 범위</h3>
+
+              {booksInCategory.map((b) => {
+                const checked = selectedBooks.has(b.book);
+                return (
+                  <div key={b.book} style={{ marginTop: 10 }}>
+                    <label style={{ fontWeight: 900 }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleBook(b.book)}
+                      />{" "}
+                      {b.book}
+                    </label>
+
+                    {checked && (
+                      <input
+                        style={{ ...fieldStyle, marginTop: 6 }}
+                        value={chaptersByBook[b.book] || ""}
+                        onChange={(e) =>
+                          setChaptersByBook((m) => ({
+                            ...m,
+                            [b.book]: e.target.value,
+                          }))
+                        }
+                        placeholder="예: 4-8, 10"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
+            {isOfficial ? (
+              <button className="button-lg" onClick={() => go("/exam/official")}>
+                시험보기(공식)
+              </button>
+            ) : (
+              <>
+                <button className="button-lg" onClick={() => go("/practice/mcq")}>
+                  연습하기 → 객관식
+                </button>
+                <button
+                  className="button-lg"
+                  style={{ background: "#fff", color: "#ff6fa3", border: "2px solid #ff8fb7" }}
+                  onClick={() => go("/practice/mock")}
+                >
+                  연습하기 → 모의시험
+                </button>
+              </>
+            )}
+          </div>
+
         </div>
       </div>
     </StudentShell>
@@ -653,12 +302,8 @@ export default function BookRangePage({ mode = "practice" }) {
 
 const fieldStyle = {
   width: "100%",
-  boxSizing: "border-box",
   padding: "10px 12px",
   border: "1px solid #ffd3e3",
   borderRadius: 10,
-  outline: "none",
   fontSize: 14,
-  background: "#fff",
-  color: "#1f2a44",
 };

@@ -32,34 +32,87 @@ function useQuery() {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
+/**
+ * selections 정규화
+ * - 다중: loc.state.selections = [{ book, chapters }] (권장)
+ * - 레거시 단일: book + chapters/start/end 지원
+ */
+function normalizeSelections({ locState, query }) {
+  const qBook = query.get('book') || '';
+  const qChapters = query.get('chapters');
+  const qStart = query.get('start');
+  const qEnd = query.get('end');
+
+  const legacy = {
+    book: (locState?.book) || qBook || '',
+    chapters: (() => {
+      const st = ensureArray(locState?.chapters);
+      if (st?.length) return st;
+      const parsed = parseChapterInput(qChapters);
+      return parsed?.length ? parsed : [];
+    })(),
+    start: Number(qStart),
+    end: Number(qEnd),
+    _rawChaptersParam: qChapters || '',
+  };
+
+  const rawSelections = ensureArray(locState?.selections);
+
+  if (rawSelections.length) {
+    const normalized = rawSelections
+      .map((s) => {
+        const book = (s?.book || '').trim();
+        if (!book) return null;
+
+        let chapters = [];
+        if (Array.isArray(s?.chapters)) chapters = s.chapters.filter((n) => Number.isFinite(Number(n))).map(Number);
+        else if (typeof s?.chapters === 'string') chapters = parseChapterInput(s.chapters);
+        else chapters = [];
+
+        const start = Number(s?.start);
+        const end = Number(s?.end);
+
+        return { book, chapters, start, end, raw: s };
+      })
+      .filter(Boolean);
+
+    if (normalized.length) return { mode: 'multi', selections: normalized, legacy };
+  }
+
+  if (!legacy.book) return { mode: 'none', selections: [], legacy };
+  return { mode: 'single', selections: [{ book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, raw: null }], legacy };
+}
+
+function selectionToText(sel, legacyRawChaptersParam = '') {
+  const book = sel.book;
+  const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
+  const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
+
+  if (chapters.length) return `${book} (${chapters.join(', ')})`;
+  if (legacyRawChaptersParam && !chapters.length) return `${book} (${legacyRawChaptersParam})`;
+  if (hasRange) return `${book} (${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)}강)`;
+  return `${book}`;
+}
+
 export default function MockExamPage() {
   const nav = useNavigate();
   const loc = useLocation();
   const q = useQuery();
 
-  // 쿼리 파라미터(레거시) 및 state(신규) 모두 지원
-  const bookFromQuery = q.get('book');
-  const chaptersParam = q.get('chapters'); // "4-8,10" 형태
-  const startParam = q.get('start');
-  const endParam = q.get('end');
-
-  const book =
-    (loc.state && loc.state.book) ||
-    (bookFromQuery || '');
-
-  const chaptersFromState = ensureArray(loc.state?.chapters); // number[] or []
-  const chaptersFromQuery = parseChapterInput(chaptersParam); // number[] or []
-
-  // 범위 방식을 위한 start/end (숫자 or NaN)
-  const start = Number(startParam);
-  const end = Number(endParam);
-
   const me = getSession();
+
+  const { mode, selections, legacy } = useMemo(() => {
+    return normalizeSelections({ locState: loc.state, query: q });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.state, loc.search]);
 
   // 설정 단계
   const [numQ, setNumQ] = useState(30);
   const [cutMiss, setCutMiss] = useState(3);
+
+  // 로드된 전체 단어(다중 책 합친 결과)
   const [words, setWords] = useState([]);
+
   const [phase, setPhase] = useState('config'); // config | exam | done
   const [reviewOpen, setReviewOpen] = useState(false);
 
@@ -79,47 +132,60 @@ export default function MockExamPage() {
   const [corrects, setCorrects] = useState(0);
   const [results, setResults] = useState([]);
 
-  // 실제 사용할 챕터 배열(우선순위: state > query > 없음)
-  const chapterList = useMemo(() => {
-    if (chaptersFromState.length) return chaptersFromState;
-    if (chaptersFromQuery.length) return chaptersFromQuery;
-    return [];
-  }, [chaptersFromState, chaptersFromQuery]);
+  // 상단 표시 텍스트
+  const headerText = useMemo(() => {
+    if (mode === 'none') return '';
+    const list = selections.map((s) => selectionToText(s, legacy._rawChaptersParam)).filter(Boolean);
+    if (list.length <= 1) return list[0] || '';
+    return `${list.length}권 선택: ${list.join(' / ')}`;
+  }, [mode, selections, legacy._rawChaptersParam]);
 
   useEffect(() => {
     answerRef.current = answer;
   }, [answer]);
 
-  // 단어 로드: chapterList가 있으면 in(...) 조회, 아니면 start~end 범위 조회
+  // 단어 로드: selections를 모두 불러서 합친다
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
-      if (!book) return setWords([]);
-
-      // chapter 방식
-      if (chapterList.length > 0) {
-        const range = await fetchWordsByChapters(book, chapterList);
-        setWords(range || []);
+      if (mode === 'none' || !selections.length) {
+        if (mounted) setWords([]);
         return;
       }
 
-      // 범위 방식(둘 다 정상 숫자일 때만)
-      if (Number.isFinite(start) && Number.isFinite(end)) {
-        const range = await fetchWordsInRange(book, start, end);
-        setWords(range || []);
-        return;
+      const chunks = [];
+      for (const sel of selections) {
+        const book = sel.book;
+        const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
+        const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
+
+        let range = [];
+
+        if (chapters.length > 0) {
+          range = await fetchWordsByChapters(book, chapters);
+        } else if (hasRange) {
+          range = await fetchWordsInRange(book, sel.start, sel.end);
+        } else {
+          range = [];
+        }
+
+        const withBook = (range || []).map((w) => ({ ...w, book: w.book || book }));
+        chunks.push(...withBook);
       }
 
-      // 둘 다 아니면 빈 배열
-      setWords([]);
+      if (!mounted) return;
+      setWords(chunks || []);
+      // config 화면에 있을 때만 상태 강제 초기화는 하지 않음(사용자 설정 유지)
     })();
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book, chapterList.join(','), start, end]);
+    return () => { mounted = false; };
+  }, [mode, selections, legacy._rawChaptersParam]);
 
   // 시험 시작
   function startExam() {
     if (!words.length) return alert('선택한 범위에 단어가 없습니다.');
-    // 입력 유효화
+
     const n = Math.max(1, Math.min(Number(numQ) || 0, 999));
     const c = Math.max(0, Math.min(Number(cutMiss) || 0, 999));
     if (n !== numQ) setNumQ(n);
@@ -174,9 +240,10 @@ export default function MockExamPage() {
       await supabase.from('study_logs').insert([
         {
           student_id: me?.id,
-          book,
-          chapter: word?.chapter,
-          word_id: word?.id,
+          // ✅ 다중책: 문항의 book 기준으로 기록
+          book: word?.book || selections?.[0]?.book || legacy.book || null,
+          chapter: word?.chapter ?? null,
+          word_id: word?.id ?? null,
           action,
           payload: { mode: 'mock' },
         },
@@ -223,7 +290,7 @@ export default function MockExamPage() {
     return miss <= cutMiss ? '통과' : '불통과';
   }
 
-  if (!book) {
+  if (mode === 'none') {
     return (
       <StudentShell>
         <div className="vh-100 centered with-safe" style={{ width:'100%' }}>
@@ -235,10 +302,14 @@ export default function MockExamPage() {
     );
   }
 
-  // 상단 표시용 챕터 텍스트
-  const chapterText = chaptersParam
-    ? chaptersParam
-    : (chapterList.length ? chapterList.join(', ') : '');
+  // 상단 현재 문항 메타(다중책에서 유용)
+  const currentMetaText = useMemo(() => {
+    const w = seq[i];
+    if (!w) return '';
+    const b = w?.book || '';
+    const ch = Number.isFinite(Number(w?.chapter)) ? `${w.chapter}강` : '';
+    return [b, ch].filter(Boolean).join(' | ');
+  }, [seq, i]);
 
   return (
     <StudentShell>
@@ -247,11 +318,14 @@ export default function MockExamPage() {
           <div className="student-card">
             {/* 상단 간략 정보 */}
             <div style={{ color:'#444', marginBottom: 6, fontSize:13 }}>
-              책: <b>{book}</b> | {chapterList.length
-                ? <>챕터: <b>{chapterText}</b></>
-                : (Number.isFinite(start) && Number.isFinite(end)
-                    ? <>범위: <b>{start}~{end}강</b></>
-                    : <>범위: <b>미지정</b></>)}
+              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                {headerText || selectionToText(selections[0], legacy._rawChaptersParam)}
+              </div>
+              {phase === 'exam' && currentMetaText && (
+                <div style={{ fontSize:12, color:'#777', marginTop:2 }}>
+                  현재: {currentMetaText}
+                </div>
+              )}
             </div>
 
             {/* 설정 */}
@@ -349,7 +423,14 @@ export default function MockExamPage() {
                     <div><b>전체 문제 리뷰</b> (정답/내 답/정오)</div>
                     {results.map((r, idx) => (
                       <div key={idx} style={styles.item}>
-                        <div><b>{idx + 1}. {r.word.term_en}</b> — {r.ok ? <span style={styles.ok}>정답</span> : <span style={styles.nok}>오답</span>}</div>
+                        <div>
+                          <b>{idx + 1}. {r.word.term_en}</b> — {r.ok ? <span style={styles.ok}>정답</span> : <span style={styles.nok}>오답</span>}
+                          {r.word?.book && (
+                            <span style={{ marginLeft: 8, fontSize: 12, color:'#777' }}>
+                              ({r.word.book}{Number.isFinite(Number(r.word.chapter)) ? ` ${r.word.chapter}강` : ''})
+                            </span>
+                          )}
+                        </div>
                         <div>정답: {r.word.meaning_ko}</div>
                         <div>내 답: {r.your || '(무응답)'}</div>
                       </div>

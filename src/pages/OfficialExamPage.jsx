@@ -28,26 +28,79 @@ function useQuery() {
   return useMemo(() => new URLSearchParams(search), [search]);
 }
 
+/**
+ * selections 정규화
+ * - 다중: loc.state.selections = [{ book, chapters }] (권장)
+ * - 레거시 단일: book + chapters/start/end 지원
+ */
+function normalizeSelections({ locState, query }) {
+  const qBook = query.get('book') || '';
+  const qChapters = query.get('chapters'); // "4-6,8,10"
+  const qStart = query.get('start');
+  const qEnd = query.get('end');
+
+  const legacy = {
+    book: (locState?.book) || qBook || '',
+    chapters: (() => {
+      const st = ensureArray(locState?.chapters);
+      if (st?.length) return st;
+      const parsed = parseChapterInput(qChapters);
+      return parsed?.length ? parsed : [];
+    })(),
+    start: Number(qStart),
+    end: Number(qEnd),
+    _rawChaptersParam: qChapters || '',
+  };
+
+  const rawSelections = ensureArray(locState?.selections);
+
+  if (rawSelections.length) {
+    const normalized = rawSelections
+      .map((s) => {
+        const book = (s?.book || '').trim();
+        if (!book) return null;
+
+        let chapters = [];
+        if (Array.isArray(s?.chapters)) chapters = s.chapters.filter((n) => Number.isFinite(Number(n))).map(Number);
+        else if (typeof s?.chapters === 'string') chapters = parseChapterInput(s.chapters);
+        else chapters = [];
+
+        const start = Number(s?.start);
+        const end = Number(s?.end);
+
+        return { book, chapters, start, end, raw: s };
+      })
+      .filter(Boolean);
+
+    if (normalized.length) return { mode: 'multi', selections: normalized, legacy };
+  }
+
+  if (!legacy.book) return { mode: 'none', selections: [], legacy };
+  return { mode: 'single', selections: [{ book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, raw: null }], legacy };
+}
+
+function selectionToText(sel, legacyRawChaptersParam = '') {
+  const book = sel.book;
+  const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
+  const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
+
+  if (chapters.length) return `${book} (${chapters.join(', ')})`;
+  if (legacyRawChaptersParam && !chapters.length) return `${book} (${legacyRawChaptersParam})`;
+  if (hasRange) return `${book} (${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)})`;
+  return `${book}`;
+}
+
 export default function OfficialExamPage() {
   const nav = useNavigate();
   const loc = useLocation();
   const q = useQuery();
 
-  // 레거시 쿼리
-  const bookFromQuery = q.get('book') || '';
-  const chaptersParam = q.get('chapters'); // "4-6,8,10"
-  const startParam = q.get('start');
-  const endParam = q.get('end');
-
-  // state 우선
-  const book = (loc.state?.book) || bookFromQuery;
-  const chaptersFromState = ensureArray(loc.state?.chapters);   // number[] or []
-  const chaptersFromQuery = parseChapterInput(chaptersParam);    // number[]
-
-  const start = Number(startParam);
-  const end = Number(endParam);
-
   const me = getSession();
+
+  const { mode, selections, legacy } = useMemo(() => {
+    return normalizeSelections({ locState: loc.state, query: q });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.state, loc.search]);
 
   // 로그인/세션 가드
   useEffect(() => {
@@ -60,7 +113,7 @@ export default function OfficialExamPage() {
   // 설정
   const [numQ, setNumQ] = useState(30);
   const [cutMiss, setCutMiss] = useState(3);
-  const [words, setWords] = useState([]);
+  const [words, setWords] = useState([]); // 다중 책 합친 문제 풀
   const [phase, setPhase] = useState('config'); // config | exam | submitted
 
   // 진행
@@ -80,40 +133,60 @@ export default function OfficialExamPage() {
   const [results, setResults] = useState([]); // [{word, your, ok}]
   const [sessionId, setSessionId] = useState(null); // 포커스 이탈 로그용
 
-  // ✅ 이탈 이벤트 기록용 (관리자 실시간 알림/집중모니터 상세에 쓰임)
+  // ✅ 이탈 이벤트 기록용
   const [profileMeta, setProfileMeta] = useState({ name: '', teacher_name: null });
-  const lastFocusEventAtRef = useRef(0); // 중복 스팸 방지
+  const lastFocusEventAtRef = useRef(0);
 
-  // 실제 사용할 챕터 배열 (우선순위: state > query > [])
-  const chapterList = useMemo(() => {
-    if (chaptersFromState.length) return chaptersFromState;
-    if (chaptersFromQuery.length) return chaptersFromQuery;
-    return [];
-  }, [chaptersFromState, chaptersFromQuery]);
+  // 상단 표시 텍스트
+  const headerText = useMemo(() => {
+    if (mode === 'none') return '';
+    const list = selections.map((s) => selectionToText(s, legacy._rawChaptersParam)).filter(Boolean);
+    if (list.length <= 1) return list[0] || '';
+    return `${list.length}권 선택: ${list.join(' / ')}`;
+  }, [mode, selections, legacy._rawChaptersParam]);
 
   useEffect(() => { answerRef.current = answer; }, [answer]);
 
-  // 단어 로드: chapterList 있으면 in(...), 아니면 start~end
+  // ✅ 다중 책 단어 로드 (각 selection 범위에서 불러와 합침)
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
-      if (!book) return setWords([]);
+      try {
+        if (mode === 'none' || !selections.length) {
+          if (mounted) setWords([]);
+          return;
+        }
 
-      if (chapterList.length > 0) {
-        const range = await fetchWordsByChapters(book, chapterList);
-        setWords(range || []);
-        return;
+        const chunks = [];
+        for (const sel of selections) {
+          const book = sel.book;
+          const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
+          const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
+
+          let range = [];
+          if (chapters.length > 0) {
+            range = await fetchWordsByChapters(book, chapters);
+          } else if (hasRange) {
+            range = await fetchWordsInRange(book, sel.start, sel.end);
+          } else {
+            range = [];
+          }
+
+          const withBook = (range || []).map((w) => ({ ...w, book: w.book || book }));
+          chunks.push(...withBook);
+        }
+
+        if (!mounted) return;
+        setWords(chunks || []);
+      } catch (e) {
+        console.error('[OfficialExam] load failed:', e);
+        if (mounted) setWords([]);
       }
-
-      if (Number.isFinite(start) && Number.isFinite(end)) {
-        const range = await fetchWordsInRange(book, start, end);
-        setWords(range || []);
-        return;
-      }
-
-      setWords([]);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book, chapterList.join(','), start, end]);
+
+    return () => { mounted = false; };
+  }, [mode, selections, legacy._rawChaptersParam]);
 
   // 포커스 이탈 감지 훅 (기존 로컬 알림/가드 유지)
   useExamFocusGuard({
@@ -122,29 +195,28 @@ export default function OfficialExamPage() {
     enableAlert: true,
   });
 
-  // ✅ 관리자에게 "어느 페이지든" 실시간 알림이 오게 하려면:
-  // 학생이 이탈할 때마다 public.focus_events 테이블에 INSERT 1줄을 남겨야 함.
-  // (관리자 쪽에서 그 테이블 INSERT를 Realtime 구독 → 토스트 알림)
+  // ✅ 관리자에게 이탈 이벤트 기록
   async function reportFocusEvent(eventType, detail = {}) {
     try {
       if (!me?.id) return;
-      if (!sessionId) return;             // 세션ID 생긴 뒤부터 기록 (시험 시작 전엔 기록하지 않음)
-      if (phase !== 'exam') return;       // 시험 중일 때만 기록
+      if (!sessionId) return;       // 세션ID 생긴 뒤부터 기록
+      if (phase !== 'exam') return; // 시험 중일 때만
 
-      // 중복/스팸 방지 (짧은 연속 이벤트)
       const now = Date.now();
       if (now - lastFocusEventAtRef.current < 800) return;
       lastFocusEventAtRef.current = now;
 
+      const curWord = seq?.[i];
       await supabase.from('focus_events').insert([{
         session_id: sessionId,
         student_id: me?.id,
         student_name: profileMeta?.name || me?.name || '',
         teacher_name: profileMeta?.teacher_name ?? null,
-        event_type: eventType,   // 'hidden' | 'blur' | 'pagehide' 등
+        event_type: eventType,
         detail: {
           ...detail,
-          book: book || null,
+          // ✅ 다중책: 현재 문항 book 기록
+          book: curWord?.book || null,
           at_question: (i + 1) || null,
           total_questions: seq?.length || null,
           visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
@@ -152,7 +224,7 @@ export default function OfficialExamPage() {
         },
       }]);
     } catch {
-      // 이탈 기록 실패는 시험 진행을 막지 않음
+      // 기록 실패는 시험 진행을 막지 않음
     }
   }
 
@@ -162,9 +234,7 @@ export default function OfficialExamPage() {
     if (!sessionId) return;
 
     const onVis = () => {
-      if (document.visibilityState === 'hidden') {
-        reportFocusEvent('hidden');
-      }
+      if (document.visibilityState === 'hidden') reportFocusEvent('hidden');
     };
     const onBlur = () => reportFocusEvent('blur');
     const onPageHide = (e) => reportFocusEvent('pagehide', { persisted: !!e?.persisted });
@@ -179,23 +249,36 @@ export default function OfficialExamPage() {
       window.removeEventListener('pagehide', onPageHide);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, sessionId, i, (seq?.length || 0), book, profileMeta?.name, profileMeta?.teacher_name]);
+  }, [phase, sessionId, i, (seq?.length || 0), profileMeta?.name, profileMeta?.teacher_name]);
 
-  function computeChapterBounds() {
-    if (chapterList.length) {
-      return { chapter_start: Math.min(...chapterList), chapter_end: Math.max(...chapterList) };
-    }
-    if (Number.isFinite(start) && Number.isFinite(end)) {
-      return { chapter_start: Math.min(start, end), chapter_end: Math.max(start, end) };
-    }
-    throw new Error('챕터 범위를 계산할 수 없습니다. (입력 형식을 확인하세요)');
+  // ✅ 다중책용: chapters_text 생성 (책별 범위를 문자열로 저장)
+  function computeChaptersTextFromSelections() {
+    const parts = (selections || []).map((sel) => {
+      const book = sel.book;
+      const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
+      const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
+
+      let rangeText = '';
+      if (chapters.length) rangeText = chapters.join(', ');
+      else if (sel?.raw && typeof sel.raw?.chapters === 'string' && sel.raw.chapters.trim()) rangeText = sel.raw.chapters.trim();
+      else if (legacy._rawChaptersParam && book === legacy.book && !chapters.length) rangeText = legacy._rawChaptersParam.trim();
+      else if (hasRange) rangeText = `${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)}`;
+      else rangeText = '미지정';
+
+      return `${book}:${rangeText}`;
+    }).filter(Boolean);
+
+    return parts.join(' | ');
   }
 
-  function computeChaptersText() {
-    if (chaptersParam && chaptersParam.trim()) return chaptersParam.trim(); // 자유형 그대로
-    if (chapterList.length) return chapterList.join(', ');
-    if (Number.isFinite(start) && Number.isFinite(end)) return `${Math.min(start, end)}~${Math.max(start, end)}`;
-    return '';
+  // ✅ 세션 테이블 호환을 위해 chapter_start/end는 "전체 선택 범위의 최소~최대(챕터)"로 저장
+  // (다중 책이라 정확한 의미는 약해지지만, 기존 컬럼을 깨지 않기 위한 호환값)
+  function computeGlobalChapterBoundsFromWords() {
+    const chs = (words || [])
+      .map((w) => Number(w?.chapter))
+      .filter((n) => Number.isFinite(n));
+    if (!chs.length) throw new Error('챕터 범위를 계산할 수 없습니다. (선택 범위에 단어가 없음)');
+    return { chapter_start: Math.min(...chs), chapter_end: Math.max(...chs) };
   }
 
   async function startExam() {
@@ -203,7 +286,7 @@ export default function OfficialExamPage() {
       alert('로그인이 필요합니다. 다시 로그인해 주세요.');
       return nav('/');
     }
-    if (!book) return alert('잘못된 접근입니다. (책 정보 없음)');
+    if (mode === 'none') return alert('잘못된 접근입니다. (범위 정보 없음)');
     if (!words.length) return alert('선택한 범위에 단어가 없습니다.');
 
     // 입력 유효화
@@ -214,11 +297,11 @@ export default function OfficialExamPage() {
 
     const chosen = sampleN(words, n);
 
-    // 세션 먼저 생성(draft) → sessionId 확보(이탈 로그/제출 업데이트용)
+    // ✅ 다중책: chapters_text는 selections 기반
     let bounds, chaptersText;
     try {
-      bounds = computeChapterBounds();
-      chaptersText = computeChaptersText();
+      bounds = computeGlobalChapterBoundsFromWords();
+      chaptersText = computeChaptersTextFromSelections();
       if (!chaptersText) throw new Error('챕터 표기 생성 실패');
     } catch (e) {
       return alert(e.message || '범위 계산 중 오류');
@@ -234,27 +317,26 @@ export default function OfficialExamPage() {
         .maybeSingle();
       profileName = profile?.name || me?.name || '';
       profileTeacher = profile?.teacher_name || null;
-    } catch {
-      // 무시
-    }
+    } catch {}
 
-    // ✅ profileMeta 저장 (이탈 이벤트에 같이 적기 위함)
     setProfileMeta({ name: profileName || '', teacher_name: profileTeacher ?? null });
 
+    // ✅ 세션 생성(draft)
     try {
       const payload = {
         mode: 'official',
-        status: 'draft',            // ✅ 시작은 draft
+        status: 'draft',
         student_id: me?.id,
         student_name: profileName,
         teacher_name: profileTeacher,
-        book,
+        // ✅ 다중책에서도 book 컬럼을 비우지 않기 위해 "첫 책"을 대표로 저장
+        book: selections?.[0]?.book || legacy.book || null,
         chapters_text: chaptersText,
         chapter_start: bounds.chapter_start,
         chapter_end: bounds.chapter_end,
         num_questions: n,
         cutoff_miss: c,
-        duration_sec: 6,            // 고정 6초
+        duration_sec: 6,
         auto_score: 0,
         auto_pass: null,
       };
@@ -268,9 +350,6 @@ export default function OfficialExamPage() {
       if (error) throw error;
       if (!data?.id) throw new Error('SESSION_INSERT_OK_BUT_NO_ID');
       setSessionId(data.id);
-
-      // (선택) 시험 시작 이벤트도 남기고 싶으면:
-      // reportFocusEvent('exam_start', { chapters_text: chaptersText, num_questions: n, cutoff_miss: c });
     } catch (err) {
       console.error('[OfficialExam] session insert error:', err);
       alert(
@@ -323,7 +402,15 @@ export default function OfficialExamPage() {
   async function log(action, word) {
     try {
       await supabase.from('study_logs').insert([
-        { student_id: me?.id, book, chapter: word?.chapter, word_id: word?.id, action, payload: { mode: 'official' } },
+        {
+          student_id: me?.id,
+          // ✅ 다중책: 문항의 book 기준으로 기록
+          book: word?.book || selections?.[0]?.book || legacy.book || null,
+          chapter: word?.chapter ?? null,
+          word_id: word?.id ?? null,
+          action,
+          payload: { mode: 'official' },
+        },
       ]);
     } catch {
       // 로깅 실패는 치명적이지 않음
@@ -353,7 +440,7 @@ export default function OfficialExamPage() {
     answerRef.current = '';
 
     if (i + 1 >= seq.length) {
-      finalizeAndSend(next); // 비동기 저장
+      finalizeAndSend(next);
     } else {
       setI((x) => x + 1);
       setTimeout(() => inputRef.current?.focus(), 50);
@@ -366,8 +453,8 @@ export default function OfficialExamPage() {
     // 예외 복구: 세션이 없다면(draft로) 즉시 생성
     if (!sid) {
       try {
-        const bounds = computeChapterBounds();
-        const chaptersText = computeChaptersText();
+        const bounds = computeGlobalChapterBoundsFromWords();
+        const chaptersText = computeChaptersTextFromSelections();
 
         let profileName = '', profileTeacher = null;
         try {
@@ -390,7 +477,7 @@ export default function OfficialExamPage() {
             student_id: me?.id,
             student_name: profileName,
             teacher_name: profileTeacher,
-            book,
+            book: selections?.[0]?.book || legacy.book || null,
             chapters_text: chaptersText,
             chapter_start: bounds.chapter_start,
             chapter_end: bounds.chapter_end,
@@ -423,7 +510,7 @@ export default function OfficialExamPage() {
       const { error } = await supabase
         .from('test_sessions')
         .update({
-          status: 'submitted',  // ✅ 제출 순간에만 submitted
+          status: 'submitted',
           auto_score: autoScore,
           auto_pass: autoPass,
         })
@@ -463,7 +550,7 @@ export default function OfficialExamPage() {
     setPhase('submitted');
   }
 
-  if (!book) {
+  if (mode === 'none') {
     return (
       <StudentShell>
         <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
@@ -475,15 +562,17 @@ export default function OfficialExamPage() {
     );
   }
 
-  // 상단 표시 텍스트
-  const chapterTextFromQuery = chaptersParam || '';
-  const chapterText = chapterList.length
-    ? chapterList.join(', ')
-    : (chapterTextFromQuery
-        ? chapterTextFromQuery
-        : (Number.isFinite(start) && Number.isFinite(end)
-            ? `${Math.min(start, end)}~${Math.max(start, end)}`
-            : '미지정'));
+  // config 화면 표시용: 현재 선택 요약
+  const rangeTextForConfig = headerText || selectionToText(selections?.[0] || { book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end }, legacy._rawChaptersParam);
+
+  // exam 화면 표시용: 현재 문항 book/chapter
+  const currentMetaText = useMemo(() => {
+    const w = seq?.[i];
+    if (!w) return '';
+    const b = w?.book || '';
+    const ch = Number.isFinite(Number(w?.chapter)) ? `${w.chapter}강` : '';
+    return [b, ch].filter(Boolean).join(' | ');
+  }, [seq, i]);
 
   return (
     <StudentShell>
@@ -496,7 +585,7 @@ export default function OfficialExamPage() {
                 <div className="student-row">
                   <div>
                     <div style={{ fontSize: 13, color: '#444' }}>책 / 범위</div>
-                    <div style={styles.info}>{book} | {chapterText}</div>
+                    <div style={styles.info}>{rangeTextForConfig}</div>
                   </div>
                   <div />
                   <div>
@@ -533,10 +622,17 @@ export default function OfficialExamPage() {
             {/* exam 단계 */}
             {phase === 'exam' && (
               <div style={{ marginTop: 6 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                   <div>문항 {i + 1} / {seq.length}</div>
                   <div>맞춘 개수: {corrects}</div>
                 </div>
+
+                {currentMetaText && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#777', textAlign: 'center' }}>
+                    {currentMetaText}
+                  </div>
+                )}
+
                 <div style={styles.term}>{seq[i]?.term_en}</div>
                 <div style={styles.timer}>남은 시간: {remaining}초</div>
 
