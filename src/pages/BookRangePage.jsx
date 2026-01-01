@@ -1,10 +1,14 @@
 // src/pages/BookRangePage.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import dayjs from "dayjs";
+import "dayjs/locale/ko";
 import { fetchChapters, parseChapterInput } from "../utils/vocab";
 import { supabase } from "../utils/supabaseClient";
 import StudentShell from "./StudentShell";
 import { getSession } from "../utils/session";
+
+dayjs.locale("ko");
 
 const COLORS = {
   bg: "#fff5f8",
@@ -506,7 +510,9 @@ export default function BookRangePage({ mode = "practice" }) {
                 {me?.name ? `${me.name}님의 오답 파일` : "내 오답 파일"}
               </div>
 
-              {wrongErr && <div style={{ color: COLORS.danger, marginTop: 8, fontWeight: 900 }}>{wrongErr}</div>}
+              {wrongErr && (
+                <div style={{ color: COLORS.danger, marginTop: 8, fontWeight: 900 }}>{wrongErr}</div>
+              )}
 
               <div
                 style={{
@@ -544,7 +550,9 @@ export default function BookRangePage({ mode = "practice" }) {
                           >
                             <div style={{ fontWeight: 900, color: COLORS.text }}>
                               📁 {month}{" "}
-                              <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>({monthCount}개)</span>
+                              <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
+                                ({monthCount}개)
+                              </span>
                             </div>
 
                             <button
@@ -565,6 +573,21 @@ export default function BookRangePage({ mode = "practice" }) {
                           <div style={{ display: "grid", gap: 8 }}>
                             {rows.map((r) => {
                               const checked = selectedWrongBookIds.has(r.id);
+
+                              // ✅ 표시용 파일명: "학생명 YYYY.MM.DD"
+                              const baseName = (me?.name || "").trim() || "나";
+                              const d = r.exam_date || r.created_at;
+                              const dateLabel = d ? dayjs(d).format("YYYY.MM.DD") : "";
+                              const displayTitle = dateLabel ? `${baseName} ${dateLabel}` : baseName;
+
+                              // ✅ 원본 한 줄: "책 | 범위" (원본: 제거)
+                              const originLine = [
+                                (r.source_book || "").trim(),
+                                (r.source_chapters_text || "").trim(),
+                              ]
+                                .filter(Boolean)
+                                .join(" | ");
+
                               return (
                                 <label
                                   key={r.id}
@@ -586,11 +609,24 @@ export default function BookRangePage({ mode = "practice" }) {
                                     onChange={() => toggleWrong(r.id)}
                                     style={{ marginTop: 3 }}
                                   />
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: 900, color: COLORS.text }}>{r.title}</div>
-                                    <div style={{ fontSize: 12, color: COLORS.sub, marginTop: 4, fontWeight: 800 }}>
-                                      원본: {r.source_book || "—"}{" "}
-                                      {r.source_chapters_text ? `(${r.source_chapters_text})` : ""}
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 900, color: COLORS.text }}>
+                                      {displayTitle}
+                                    </div>
+
+                                    <div
+                                      style={{
+                                        fontSize: 12,
+                                        color: COLORS.sub,
+                                        marginTop: 4,
+                                        fontWeight: 800,
+                                        whiteSpace: "nowrap",
+                                        overflow: "hidden",
+                                        textOverflow: "ellipsis",
+                                      }}
+                                      title={originLine || ""}
+                                    >
+                                      {originLine || "—"}
                                     </div>
                                   </div>
                                 </label>
