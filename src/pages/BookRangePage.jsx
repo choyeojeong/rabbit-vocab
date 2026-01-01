@@ -1,308 +1,419 @@
-// src/pages/BookRangePage.jsx
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { fetchBooks, parseChapterInput } from '../utils/vocab';
-import StudentShell from './StudentShell';
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { fetchChapters, parseChapterInput } from "../utils/vocab";
+import { supabase } from "../utils/supabaseClient";
+import StudentShell from "./StudentShell";
 
-const styles = {
-  page: { minHeight: '100vh', background: '#fff5f8', padding: 16 },
-  wrap: { maxWidth: 860, margin: '0 auto' },
-  card: { background: '#fff', border: '1px solid #ffd3e3', borderRadius: 14, padding: 16, boxShadow: '0 8px 30px rgba(255,111,163,0.08)' },
-  title: { fontSize: 20, fontWeight: 900, color: '#333', marginBottom: 8 },
-  sub: { fontSize: 13, color: '#666', marginBottom: 12, lineHeight: 1.4 },
-  row2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
-  row3: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 },
-  label: { fontSize: 12, color: '#666', marginBottom: 6 },
-  input: { width: '100%', padding: '12px 12px', border: '1px solid #ffd3e3', borderRadius: 10, outline: 'none', fontSize: 14 },
-  select: { width: '100%', padding: '12px 12px', border: '1px solid #ffd3e3', borderRadius: 10, outline: 'none', fontSize: 14, background: '#fff' },
-  btn: { padding: '12px 14px', borderRadius: 10, border: 'none', color: '#fff', fontWeight: 800, cursor: 'pointer', background: '#ff6fa3' },
-  btn2: { padding: '10px 12px', borderRadius: 10, border: '1px solid #ffd3e3', color: '#333', fontWeight: 800, cursor: 'pointer', background: '#fff' },
-  btnDanger: { padding: '10px 12px', borderRadius: 10, border: '1px solid #ffb8c9', color: '#b00020', fontWeight: 800, cursor: 'pointer', background: '#fff' },
-  pill: { display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 999, background: '#fff0f5', border: '1px dashed #ff9fc0', fontSize: 12, color: '#b00020' },
-  listHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 14, marginBottom: 8 },
-  listTitle: { fontSize: 15, fontWeight: 900, color: '#333' },
-  item: { border: '1px solid #ffd3e3', borderRadius: 12, padding: 12, background: '#fff', marginTop: 10 },
-  itemTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  bookName: { fontSize: 14, fontWeight: 900, color: '#333' },
-  meta: { fontSize: 12, color: '#777', marginTop: 6 },
-  actionRow: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' },
-  hr: { border: 'none', borderTop: '1px dashed #ffd3e3', margin: '14px 0' },
-  bottomBar: { marginTop: 14, display: 'grid', gap: 10 },
-  note: { fontSize: 12, color: '#777', lineHeight: 1.4 },
-};
-
-function normalizeChapterText(t) {
-  return (t ?? '').toString().replace(/\s+/g, '').trim();
-}
-
-function buildRangeLabel(chapterInput) {
-  const raw = normalizeChapterText(chapterInput);
-  const parsed = parseChapterInput(raw);
-  if (!raw) return { text: '범위 미지정', ok: false, parsed: [] };
-  if (!parsed.length) return { text: '형식 오류', ok: false, parsed: [] };
-  const min = Math.min(...parsed);
-  const max = Math.max(...parsed);
-  const count = parsed.length;
-  const compact = raw.length > 26 ? `${raw.slice(0, 26)}…` : raw;
-  return { text: `챕터: ${compact}  (총 ${count}개 · ${min}~${max}강)`, ok: true, parsed };
-}
-
-export default function BookRangePage({ mode = 'practice' }) {
+export default function BookRangePage({ mode = "practice" }) {
   const nav = useNavigate();
-  const isOfficial = mode === 'official';
+  const isOfficial = mode === "official";
 
-  const [loadingBooks, setLoadingBooks] = useState(true);
-  const [books, setBooks] = useState([]);
+  /* =========================
+     상태
+  ========================= */
+  const [bookMeta, setBookMeta] = useState([]); // { book, category_id, category_path }
+  const [catNodes, setCatNodes] = useState([]);
 
-  // 선택 UI(추가용)
-  const [pickBook, setPickBook] = useState('');
-  const [pickChapters, setPickChapters] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [catSearch, setCatSearch] = useState("");
+  const [expanded, setExpanded] = useState(() => new Set());
 
-  // ✅ 다중 선택 목록
-  // item: { id, book, chaptersText }
-  const [selections, setSelections] = useState([]);
+  // ⭐ 여러 책 선택 + 책별 챕터
+  const [selectedBooks, setSelectedBooks] = useState(() => new Set());
+  const [chaptersByBook, setChaptersByBook] = useState({}); // book -> chapterInput
+  const [chapterOptions, setChapterOptions] = useState({}); // book -> [chapters]
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoadingBooks(true);
-        const bs = await fetchBooks();
-        setBooks(bs || []);
-        if ((bs || []).length) setPickBook(bs[0]);
-      } finally {
-        setLoadingBooks(false);
-      }
-    })();
-  }, []);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
 
-  const selectedBooksSet = useMemo(() => {
-    return new Set(selections.map((s) => s.book));
-  }, [selections]);
+  const reloadingRef = useRef(false);
 
-  function addSelection() {
-    const b = (pickBook || '').trim();
-    const t = normalizeChapterText(pickChapters);
+  /* =========================
+     분류 트리 유틸
+  ========================= */
+  const tree = useMemo(() => {
+    const byId = new Map(catNodes.map((n) => [n.id, n]));
+    const childrenBy = new Map();
 
-    if (!b) return alert('책을 선택해 주세요.');
-    if (!t) return alert('챕터 범위를 입력해 주세요. 예) 4-8,10,12');
-
-    const info = buildRangeLabel(t);
-    if (!info.ok) return alert('챕터 입력 형식이 올바르지 않아요. 예) 4-8,10,12');
-
-    // 같은 책이 이미 있으면 "범위 업데이트"로 처리
-    if (selectedBooksSet.has(b)) {
-      setSelections((prev) =>
-        prev.map((s) => (s.book === b ? { ...s, chaptersText: t } : s))
-      );
-      setPickChapters('');
-      return;
+    for (const n of catNodes) {
+      const k = n.parent_id || "__root__";
+      if (!childrenBy.has(k)) childrenBy.set(k, []);
+      childrenBy.get(k).push(n);
     }
 
-    setSelections((prev) => [
-      ...prev,
-      { id: crypto?.randomUUID?.() || String(Date.now() + Math.random()), book: b, chaptersText: t },
-    ]);
-    setPickChapters('');
+    const getChildren = (pid) =>
+      (childrenBy.get(pid || "__root__") || []).sort((a, b) =>
+        (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+        (a.name || "").localeCompare(b.name || "")
+      );
+
+    const hasChild = new Set(catNodes.filter((x) => x.parent_id).map((x) => x.parent_id));
+    const isLeaf = (id) => !hasChild.has(id);
+
+    const buildPath = (id) => {
+      const parts = [];
+      let cur = byId.get(id);
+      while (cur) {
+        parts.push(cur.name);
+        cur = cur.parent_id ? byId.get(cur.parent_id) : null;
+      }
+      return parts.reverse().join(" > ");
+    };
+
+    return { byId, getChildren, isLeaf, buildPath };
+  }, [catNodes]);
+
+  /* =========================
+     데이터 로드
+  ========================= */
+  async function reloadAll() {
+    if (reloadingRef.current) return;
+    reloadingRef.current = true;
+
+    try {
+      setErr("");
+      setLoading(true);
+
+      const { data: cats } = await supabase
+        .from("book_category_nodes")
+        .select("id, parent_id, name, sort_order, created_at");
+
+      setCatNodes(cats || []);
+
+      const { data: books } = await supabase
+        .from("v_books_with_category")
+        .select("book, category_id, category_path");
+
+      setBookMeta(books || []);
+    } catch (e) {
+      console.error(e);
+      setErr("단어책/분류 데이터를 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+      reloadingRef.current = false;
+    }
   }
 
-  function removeSelection(id) {
-    setSelections((prev) => prev.filter((s) => s.id !== id));
+  useEffect(() => {
+    reloadAll();
+  }, []);
+
+  /* =========================
+     분류 선택
+  ========================= */
+  function toggleExpand(id) {
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
   }
 
-  function updateChapters(id, text) {
-    const t = normalizeChapterText(text);
-    setSelections((prev) => prev.map((s) => (s.id === id ? { ...s, chaptersText: t } : s)));
+  function onPickCategory(id) {
+    if (!tree.isLeaf(id)) {
+      toggleExpand(id);
+      return;
+    }
+    setSelectedCategoryId((p) => (p === id ? "" : id));
   }
 
-  function buildNavState() {
-    // ✅ pages/PracticeMCQ, MockExamPage, OfficialExamPage는 selections를 읽도록 수정된 상태 기준
-    // selections: [{ book, chapters }]
-    const normalized = selections
-      .map((s) => ({
-        book: s.book,
-        chapters: parseChapterInput(s.chaptersText), // number[]
-        // raw string이 필요하면 여기에 같이 붙여도 됨: chaptersText: s.chaptersText
-      }))
-      .filter((x) => x.book && x.chapters && x.chapters.length);
+  /* =========================
+     분류별 책 목록
+  ========================= */
+  const booksInCategory = useMemo(() => {
+    if (!selectedCategoryId) return [];
+    return bookMeta.filter((b) => b.category_id === selectedCategoryId);
+  }, [bookMeta, selectedCategoryId]);
 
-    if (!normalized.length) return null;
+  /* =========================
+     ✅ 선택한 책 목록용(추가 기능)
+     - selectedBooks(Set) → 배열로 보기 좋게
+     - 목록에서 선택해제/범위수정 가능
+  ========================= */
+  const selectedBookList = useMemo(() => {
+    const arr = Array.from(selectedBooks);
+    // 보기 좋게 정렬(원하면 제거 가능)
+    arr.sort((a, b) => (a || "").localeCompare(b || ""));
+    return arr;
+  }, [selectedBooks]);
 
-    // 레거시 호환: 1개일 때 book/chapters도 같이 넣어줌(기존 페이지가 혹시 단일을 참조해도 안전)
-    const legacy = normalized.length === 1 ? { book: normalized[0].book, chapters: normalized[0].chapters } : {};
-    return { selections: normalized, ...legacy };
+  function unselectBook(book) {
+    // ✅ 기존 toggleBook 로직을 그대로 재사용(선택/해제/챕터 로드 일관성 유지)
+    if (selectedBooks.has(book)) toggleBook(book);
   }
 
-  function goPracticeMCQ() {
-    const st = buildNavState();
-    if (!st) return alert('선택한 책 목록에 최소 1권 + 챕터 범위를 입력해 주세요.');
-    nav('/practice/mcq', { state: st });
+  /* =========================
+     책 선택 / 해제 (기존 유지)
+  ========================= */
+  async function toggleBook(book) {
+    setSelectedBooks((prev) => {
+      const next = new Set(prev);
+      if (next.has(book)) {
+        next.delete(book);
+      } else {
+        next.add(book);
+      }
+      return next;
+    });
+
+    // 처음 선택 시 챕터 로드
+    if (!chapterOptions[book]) {
+      const cs = await fetchChapters(book);
+      setChapterOptions((m) => ({ ...m, [book]: cs }));
+      if (cs?.length) {
+        setChaptersByBook((m) => ({
+          ...m,
+          [book]: `${cs[0]}-${cs[cs.length - 1]}`,
+        }));
+      }
+    }
   }
 
-  function goMock() {
-    const st = buildNavState();
-    if (!st) return alert('선택한 책 목록에 최소 1권 + 챕터 범위를 입력해 주세요.');
-    nav('/practice/mock', { state: st });
+  /* =========================
+     이동 (A안) (기존 유지)
+  ========================= */
+  function buildSelections() {
+    const selections = [];
+
+    for (const book of selectedBooks) {
+      const text = chaptersByBook[book];
+      if (!text) {
+        alert(`${book}의 챕터 범위를 입력해 주세요.`);
+        return null;
+      }
+      const parsed = parseChapterInput(text);
+      if (!parsed.length) {
+        alert(`${book}의 챕터 형식이 올바르지 않습니다.`);
+        return null;
+      }
+      selections.push({ book, chaptersText: text });
+    }
+
+    if (!selections.length) {
+      alert("최소 한 권 이상의 책을 선택해 주세요.");
+      return null;
+    }
+
+    return selections;
   }
 
-  function goOfficial() {
-    const st = buildNavState();
-    if (!st) return alert('선택한 책 목록에 최소 1권 + 챕터 범위를 입력해 주세요.');
-    nav('/exam/official', { state: st });
+  function go(path) {
+    const selections = buildSelections();
+    if (!selections) return;
+    nav(path, { state: { mode, selections } });
+  }
+
+  /* =========================
+     트리 렌더 (기존 유지)
+  ========================= */
+  function renderTree(parentId = null) {
+    const nodes = tree.getChildren(parentId);
+    if (!nodes.length) return null;
+
+    return (
+      <div style={{ marginLeft: parentId ? 16 : 0 }}>
+        {nodes.map((n) => {
+          const open = expanded.has(n.id);
+          const leaf = tree.isLeaf(n.id);
+          const on = selectedCategoryId === n.id;
+
+          return (
+            <div key={n.id} style={{ marginTop: 6 }}>
+              <div
+                onClick={() => onPickCategory(n.id)}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  border: "1px solid #ffd3e3",
+                  background: on ? "#ff6fa3" : "#fff",
+                  color: on ? "#fff" : "#1f2a44",
+                  cursor: "pointer",
+                  fontWeight: 900,
+                }}
+                title={tree.buildPath(n.id)}
+              >
+                {leaf ? "📘 " : "📂 "} {n.name}
+              </div>
+              {!leaf && open && renderTree(n.id)}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   return (
     <StudentShell>
-      <div style={styles.page}>
-        <div style={styles.wrap}>
-          <div style={styles.card}>
-            <div style={styles.title}>
-              {isOfficial ? '공식시험 범위 선택' : '연습 범위 선택'}
-            </div>
-            <div style={styles.sub}>
-              책을 선택하고 챕터 범위를 입력한 뒤 <b>추가</b>를 누르면 아래 <b>선택한 책 목록</b>에 쌓입니다. <br />
-              목록에서 <b>범위 수정</b>하거나 <b>선택 해제</b>할 수 있어요. (예: <b>4-8,10,12</b>)
-            </div>
+      <div className="student-container">
+        <div className="student-card stack">
+          {err && <div style={{ color: "#d00" }}>{err}</div>}
 
-            {/* 선택/추가 영역 */}
-            <div style={styles.row2}>
-              <div>
-                <div style={styles.label}>책 선택</div>
-                <select
-                  style={styles.select}
-                  value={pickBook}
-                  onChange={(e) => setPickBook(e.target.value)}
-                  disabled={loadingBooks || !books.length}
-                >
-                  {(books || []).map((b) => (
-                    <option key={b} value={b}>
-                      {b}{selectedBooksSet.has(b) ? ' (선택됨)' : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <div style={styles.label}>챕터 입력</div>
-                <input
-                  style={styles.input}
-                  value={pickChapters}
-                  onChange={(e) => setPickChapters(e.target.value)}
-                  placeholder="예) 4-8,10,12"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                />
-              </div>
-            </div>
+          <h3>분류 선택</h3>
+          <div style={{ maxHeight: 260, overflow: "auto" }}>
+            {loading ? "불러오는 중…" : renderTree(null)}
+          </div>
 
-            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-              <div style={styles.pill}>
-                💡 같은 책을 다시 추가하면 <b>그 책 범위가 업데이트</b>돼요.
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" style={styles.btn2} onClick={() => { setPickChapters(''); }}>
-                  입력 비우기
-                </button>
-                <button type="button" style={styles.btn} onClick={addSelection} disabled={loadingBooks || !books.length}>
-                  + 목록에 추가
-                </button>
-              </div>
-            </div>
+          {selectedCategoryId && (
+            <>
+              <h3 style={{ marginTop: 16 }}>책 선택 + 챕터 범위</h3>
 
-            <hr style={styles.hr} />
+              {/* ✅ 기존: 분류 내 책 목록(체크박스) 그대로 */}
+              {booksInCategory.map((b) => {
+                const checked = selectedBooks.has(b.book);
+                return (
+                  <div key={b.book} style={{ marginTop: 10 }}>
+                    <label style={{ fontWeight: 900 }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleBook(b.book)}
+                      />{" "}
+                      {b.book}
+                    </label>
 
-            {/* ✅ 선택한 책 목록 */}
-            <div style={styles.listHead}>
-              <div style={styles.listTitle}>선택한 책 목록</div>
-              <div style={{ fontSize: 12, color: '#777' }}>
-                {selections.length ? `${selections.length}권 선택됨` : '아직 선택된 책이 없어요'}
-              </div>
-            </div>
+                    {checked && (
+                      <input
+                        style={{ ...fieldStyle, marginTop: 6 }}
+                        value={chaptersByBook[b.book] || ""}
+                        onChange={(e) =>
+                          setChaptersByBook((m) => ({
+                            ...m,
+                            [b.book]: e.target.value,
+                          }))
+                        }
+                        placeholder="예: 4-8, 10"
+                      />
+                    )}
+                  </div>
+                );
+              })}
 
-            {selections.length === 0 ? (
-              <div style={styles.note}>
-                위에서 책/범위를 입력하고 <b>목록에 추가</b>를 눌러주세요.
-              </div>
-            ) : (
-              <div>
-                {selections.map((s, idx) => {
-                  const info = buildRangeLabel(s.chaptersText);
-                  return (
-                    <div key={s.id} style={styles.item}>
-                      <div style={styles.itemTop}>
-                        <div>
-                          <div style={styles.bookName}>
-                            {idx + 1}. {s.book}
+              {/* =========================
+                 ✅ 추가: 선택한 책 목록(기존 기능 건드리지 않고 "추가"만)
+              ========================= */}
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 12,
+                  borderRadius: 12,
+                  border: "1px dashed #ff9fc0",
+                  background: "#fff0f5",
+                }}
+              >
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                  선택한 책 목록{" "}
+                  <span style={{ fontSize: 12, color: "#777" }}>
+                    ({selectedBookList.length}권)
+                  </span>
+                </div>
+
+                {selectedBookList.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#777" }}>
+                    아직 선택된 책이 없어요. 위에서 책을 체크해 주세요.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {selectedBookList.map((book) => (
+                      <div
+                        key={book}
+                        style={{
+                          border: "1px solid #ffd3e3",
+                          borderRadius: 12,
+                          padding: 10,
+                          background: "#fff",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ fontWeight: 900, color: "#1f2a44" }}>
+                            {book}
                           </div>
-                          <div style={styles.meta}>
-                            {info.ok ? info.text : '챕터 입력이 비어있거나 형식이 올바르지 않아요.'}
-                          </div>
-                        </div>
 
-                        <div style={styles.actionRow}>
-                          <button type="button" style={styles.btnDanger} onClick={() => removeSelection(s.id)}>
+                          {/* 선택 해제 버튼 */}
+                          <button
+                            type="button"
+                            onClick={() => unselectBook(book)}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 10,
+                              border: "1px solid #ffb8c9",
+                              background: "#fff",
+                              color: "#b00020",
+                              fontWeight: 900,
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                            }}
+                            title="선택 해제"
+                          >
                             선택 해제
                           </button>
                         </div>
-                      </div>
 
-                      {/* ✅ 범위 수정 */}
-                      <div style={{ marginTop: 10 }}>
-                        <div style={styles.label}>범위 수정 (챕터 입력)</div>
-                        <input
-                          style={styles.input}
-                          value={s.chaptersText}
-                          onChange={(e) => updateChapters(s.id, e.target.value)}
-                          placeholder="예) 4-8,10,12"
-                          autoCapitalize="none"
-                          autoCorrect="off"
-                        />
-                        {!info.ok && (
-                          <div style={{ marginTop: 6, fontSize: 12, color: '#b00020' }}>
-                            ⚠️ 형식 예시: <b>4-8,10,12</b>
+                        {/* 범위 수정(= chaptersByBook 수정) */}
+                        <div style={{ marginTop: 8 }}>
+                          <input
+                            style={fieldStyle}
+                            value={chaptersByBook[book] || ""}
+                            onChange={(e) =>
+                              setChaptersByBook((m) => ({
+                                ...m,
+                                [book]: e.target.value,
+                              }))
+                            }
+                            placeholder="예: 4-8, 10"
+                          />
+                          <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
+                            여기서 범위를 수정하면 바로 반영돼요.
                           </div>
-                        )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    ))}
+                  </div>
+                )}
               </div>
+            </>
+          )}
+
+          <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
+            {isOfficial ? (
+              <button className="button-lg" onClick={() => go("/exam/official")}>
+                시험보기(공식)
+              </button>
+            ) : (
+              <>
+                <button className="button-lg" onClick={() => go("/practice/mcq")}>
+                  연습하기 → 객관식
+                </button>
+                <button
+                  className="button-lg"
+                  style={{
+                    background: "#fff",
+                    color: "#ff6fa3",
+                    border: "2px solid #ff8fb7",
+                  }}
+                  onClick={() => go("/practice/mock")}
+                >
+                  연습하기 → 모의시험
+                </button>
+              </>
             )}
-
-            <hr style={styles.hr} />
-
-            {/* 하단 실행 버튼 */}
-            <div style={styles.bottomBar}>
-              {!isOfficial ? (
-                <div style={styles.row2}>
-                  <button type="button" style={styles.btn} onClick={goPracticeMCQ}>
-                    객관식 연습 시작
-                  </button>
-                  <button type="button" style={styles.btn} onClick={goMock}>
-                    모의시험 시작
-                  </button>
-                </div>
-              ) : (
-                <button type="button" style={styles.btn} onClick={goOfficial}>
-                  공식시험 시작
-                </button>
-              )}
-
-              <div style={styles.note}>
-                • 다중 책 선택 시, 선택한 모든 책/범위에서 단어가 합쳐져 랜덤으로 출제됩니다. <br />
-                • 목록에서 범위를 수정하면 바로 반영돼요.
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginTop: 6 }}>
-                <button type="button" style={styles.btn2} onClick={() => nav('/dashboard')}>
-                  대시보드
-                </button>
-                <button type="button" style={styles.btn2} onClick={() => setSelections([])}>
-                  전체 선택 해제
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
     </StudentShell>
   );
 }
+
+const fieldStyle = {
+  width: "100%",
+  padding: "10px 12px",
+  border: "1px solid #ffd3e3",
+  borderRadius: 10,
+  fontSize: 14,
+};
