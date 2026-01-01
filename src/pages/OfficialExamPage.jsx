@@ -170,10 +170,10 @@ function normalizeInput({ locState, query }) {
       chapters: legacy.chapters,
       start: legacy.start,
       end: legacy.end,
-      raw: null
+      raw: null,
     }],
     legacy,
-    wrong_book_ids: []
+    wrong_book_ids: [],
   };
 }
 
@@ -609,10 +609,74 @@ export default function OfficialExamPage() {
     }
   }
 
+  /**
+   * ✅✅ 핵심 수정:
+   * - 마지막 제출 시 test_items 저장 + test_sessions.status 를 'submitted'로 올려서
+   *   관리자 검수 목록(=submitted 필터)에 반드시 뜨게 함.
+   */
   async function finalizeAndSend(finalResults) {
-    // ✅ 여기 본문은 네 프로젝트 원본 finalizeAndSend를 그대로 유지해서 붙여 넣으면 됨
-    // (draft 생성 폴백/제출/문항 저장 등)
-    setPhase('submitted');
+    try {
+      let sid = sessionId;
+
+      // 혹시 state 반영 타이밍 문제로 sid가 비어있으면 최근 세션을 보정
+      if (!sid) {
+        const { data: lastRow } = await supabase
+          .from('test_sessions')
+          .select('id, status')
+          .eq('student_id', me?.id)
+          .eq('mode', 'official')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        sid = lastRow?.id || null;
+      }
+
+      if (!sid) throw new Error('NO_SESSION_ID');
+
+      const total = finalResults.length;
+      const score = finalResults.filter((r) => r.ok).length;
+      const miss = total - score;
+      const c = Math.max(0, Math.min(Number(cutMiss) || 0, 999));
+      const pass = miss <= c;
+
+      // 1) test_items 기존 것 제거(재시도 대비)
+      await supabase.from('test_items').delete().eq('session_id', sid);
+
+      // 2) test_items insert (최신 스키마 기준)
+      const items = finalResults.map((r, idx) => ({
+        session_id: sid,
+        order_index: idx + 1,
+        question_type: 'subjective',
+        word_id: r.word?.id ?? r.word?.word_id ?? null,
+        term_en: r.word?.term_en ?? null,
+        meaning_ko: r.word?.meaning_ko ?? null,
+        student_answer: (r.your ?? '').toString(),
+        auto_ok: !!r.ok,
+        final_ok: null,
+      }));
+
+      const { error: itemsErr } = await supabase.from('test_items').insert(items);
+      if (itemsErr) throw itemsErr;
+
+      // 3) ✅✅ 상태를 submitted로 올림(여기가 핵심)
+      const { error: sessErr } = await supabase
+        .from('test_sessions')
+        .update({
+          status: 'submitted',
+          auto_score: score,
+          auto_pass: pass,
+          cutoff_miss: c,
+        })
+        .eq('id', sid);
+
+      if (sessErr) throw sessErr;
+
+      setPhase('submitted');
+    } catch (e) {
+      console.error('[finalizeAndSend] fail:', e);
+      alert(`제출 처리 중 오류가 발생했습니다.\n${e?.message || ''}`);
+      submittedRef.current = false;
+    }
   }
 
   if (mode === 'none') {
@@ -689,7 +753,7 @@ export default function OfficialExamPage() {
                     시작하기
                   </button>
 
-                  {/* ✅ 여기 핵심: 원래 들어온 모드에 맞춰 /official 또는 /study 로 복귀 */}
+                  {/* ✅ 원래 들어온 모드에 맞춰 /official 또는 /study 로 복귀 */}
                   <button type="button" style={styles.ghostBtn} onClick={() => nav(backToRangePath)}>
                     범위 다시 선택
                   </button>
@@ -744,7 +808,7 @@ export default function OfficialExamPage() {
                   시험 결과는 선생님 검수 후 전달됩니다. 잠시만 기다려 주세요.
                 </div>
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {/* ✅ 여기 핵심: 공식에서 들어온 경우 다시 /official로 */}
+                  {/* ✅ 공식에서 들어온 경우 다시 /official로 */}
                   <button type="button" style={styles.btn} onClick={() => nav(backToRangePath)}>
                     다른 범위로 공부
                   </button>
