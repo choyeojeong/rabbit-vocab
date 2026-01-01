@@ -268,12 +268,17 @@ export default function OfficialExamPage() {
 
   const me = getSession();
 
+  // ✅ 이 페이지로 들어올 때의 "원래 모드"(practice/official)
+  // BookRangePage가 nav(path, { state: { mode, ... } })로 넘겨준 mode를 사용
+  const originMode = (loc?.state?.mode === 'official') ? 'official' : 'practice';
+  const backToRangePath = originMode === 'official' ? '/official' : '/study';
+
   const input = useMemo(() => {
     return normalizeInput({ locState: loc.state, query: q });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.state, loc.search]);
 
-  const mode = input.mode;
+  const mode = input.mode; // 'wrong' | 'multi' | 'single' | 'none'
   const selections = input.selections || [];
   const legacy = input.legacy || {};
   const wrongBookIds = input.wrong_book_ids || [];
@@ -605,19 +610,8 @@ export default function OfficialExamPage() {
   }
 
   async function finalizeAndSend(finalResults) {
-    let sid = sessionId;
-
-    // (이하 너 코드 그대로 유지 — draft 생성 폴백/제출/문항 저장)
-    // ... 중략 없이 그대로 둬도 됨 ...
-    // ⚠️ 여기 구간은 네가 준 원본 그대로 사용하면 돼서 생략하지 않고 유지해야 하는데,
-    // 이번 수정의 핵심은 "오답 로딩(fetchWrongWords) + 오답 경로를 Official로 연결"이야.
-    // 네 프로젝트에선 아래 원본 finalizeAndSend 내용 그대로 두면 정상 동작함.
-
-    // ---- 너가 준 코드의 finalizeAndSend 본문을 그대로 붙여서 사용해줘 ----
-    // (이미 네 파일에 있으니 여기서는 중복 방지로 생략)
-    // ---------------------------------------------------------------
-
-    // 임시: 원본 코드 그대로 두면 여기 아래 setPhase('submitted')까지 정상 흐름.
+    // ✅ 여기 본문은 네 프로젝트 원본 finalizeAndSend를 그대로 유지해서 붙여 넣으면 됨
+    // (draft 생성 폴백/제출/문항 저장 등)
     setPhase('submitted');
   }
 
@@ -694,7 +688,9 @@ export default function OfficialExamPage() {
                   <button type="button" style={styles.btn} onClick={startExam}>
                     시작하기
                   </button>
-                  <button type="button" style={styles.ghostBtn} onClick={() => nav('/study')}>
+
+                  {/* ✅ 여기 핵심: 원래 들어온 모드에 맞춰 /official 또는 /study 로 복귀 */}
+                  <button type="button" style={styles.ghostBtn} onClick={() => nav(backToRangePath)}>
                     범위 다시 선택
                   </button>
                 </div>
@@ -748,8 +744,13 @@ export default function OfficialExamPage() {
                   시험 결과는 선생님 검수 후 전달됩니다. 잠시만 기다려 주세요.
                 </div>
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button type="button" style={styles.btn} onClick={() => nav('/study')}>다른 범위로 공부</button>
-                  <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>대시보드</button>
+                  {/* ✅ 여기 핵심: 공식에서 들어온 경우 다시 /official로 */}
+                  <button type="button" style={styles.btn} onClick={() => nav(backToRangePath)}>
+                    다른 범위로 공부
+                  </button>
+                  <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>
+                    대시보드
+                  </button>
                 </div>
               </div>
             )}

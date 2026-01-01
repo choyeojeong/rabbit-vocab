@@ -225,7 +225,7 @@ export default function BookRangePage({ mode = "practice" }) {
     setSelectedWrongBookIds(new Set());
   }
 
-  // ✅ 오답 시험보기
+  // ✅ 오답 시험보기 (mode별로 같은 state 전달)
   function goWrong(path) {
     const ids = Array.from(selectedWrongBookIds);
     if (!ids.length) {
@@ -622,14 +622,22 @@ export default function BookRangePage({ mode = "practice" }) {
                 </div>
               </div>
 
-              {/* 오답 시험 보기 버튼들 */}
+              {/* ✅✅ 오답 시작 버튼들: mode에 따라 분기 (official이면 "공식"만) */}
               <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-                <button type="button" onClick={() => goWrong("/practice/mcq")} style={primaryBtn}>
-                  오답 시험보기 → 객관식
-                </button>
-                <button type="button" onClick={() => goWrong("/practice/mock")} style={outlinePinkBtn}>
-                  오답 시험보기 → 모의시험
-                </button>
+                {isOfficial ? (
+                  <button type="button" onClick={() => goWrong("/exam/official")} style={primaryBtn}>
+                    오답 시험보기(공식)
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => goWrong("/practice/mcq")} style={primaryBtn}>
+                      오답 시험보기 → 객관식
+                    </button>
+                    <button type="button" onClick={() => goWrong("/practice/mock")} style={outlinePinkBtn}>
+                      오답 시험보기 → 모의시험
+                    </button>
+                  </>
+                )}
               </div>
             </>
           ) : (
@@ -833,6 +841,7 @@ export default function BookRangePage({ mode = "practice" }) {
                 </>
               )}
 
+              {/* ✅✅ 정규 시작 버튼들: mode에 따라 분기 (official이면 "공식"만) */}
               <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
                 {isOfficial ? (
                   <button type="button" onClick={() => go("/exam/official")} style={primaryBtn}>
