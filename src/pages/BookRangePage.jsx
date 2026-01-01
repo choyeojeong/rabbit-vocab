@@ -18,6 +18,9 @@ export default function BookRangePage({ mode = "practice" }) {
   const [catSearch, setCatSearch] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
 
+  // ✅ 맨 상단: 단어책 검색(추가)
+  const [bookSearch, setBookSearch] = useState("");
+
   // ⭐ 여러 책 선택 + 책별 챕터
   const [selectedBooks, setSelectedBooks] = useState(() => new Set());
   const [chaptersByBook, setChaptersByBook] = useState({}); // book -> chapterInput
@@ -126,19 +129,38 @@ export default function BookRangePage({ mode = "practice" }) {
   }, [bookMeta, selectedCategoryId]);
 
   /* =========================
+     ✅ 맨 상단 검색 결과(추가)
+     - bookMeta 전체에서 검색 → 중복 제거 → 알파벳/가나다 정렬
+  ========================= */
+  const searchedBooks = useMemo(() => {
+    const q = (bookSearch || "").trim().toLowerCase();
+    if (!q) return [];
+    const uniq = new Set();
+    const out = [];
+    for (const b of bookMeta) {
+      const name = (b?.book || "").toString();
+      if (!name) continue;
+      if (name.toLowerCase().includes(q)) {
+        if (!uniq.has(name)) {
+          uniq.add(name);
+          out.push(name);
+        }
+      }
+    }
+    out.sort((a, b) => (a || "").localeCompare(b || ""));
+    return out.slice(0, 30); // 너무 길어지면 화면 복잡해지니까 상위 30개만
+  }, [bookSearch, bookMeta]);
+
+  /* =========================
      ✅ 선택한 책 목록용(추가 기능)
-     - selectedBooks(Set) → 배열로 보기 좋게
-     - 목록에서 선택해제/범위수정 가능
   ========================= */
   const selectedBookList = useMemo(() => {
     const arr = Array.from(selectedBooks);
-    // 보기 좋게 정렬(원하면 제거 가능)
     arr.sort((a, b) => (a || "").localeCompare(b || ""));
     return arr;
   }, [selectedBooks]);
 
   function unselectBook(book) {
-    // ✅ 기존 toggleBook 로직을 그대로 재사용(선택/해제/챕터 로드 일관성 유지)
     if (selectedBooks.has(book)) toggleBook(book);
   }
 
@@ -248,7 +270,82 @@ export default function BookRangePage({ mode = "practice" }) {
         <div className="student-card stack">
           {err && <div style={{ color: "#d00" }}>{err}</div>}
 
-          <h3>분류 선택</h3>
+          {/* ✅ 맨 상단: 단어책 검색칸(추가) */}
+          <div>
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>단어책 검색</div>
+            <input
+              style={fieldStyle}
+              value={bookSearch}
+              onChange={(e) => setBookSearch(e.target.value)}
+              placeholder="책 이름을 입력하세요 (예: 워드마스터)"
+            />
+
+            {bookSearch.trim() && (
+              <div
+                style={{
+                  marginTop: 8,
+                  border: "1px solid #ffd3e3",
+                  borderRadius: 12,
+                  background: "#fff",
+                  padding: 10,
+                }}
+              >
+                {loading ? (
+                  <div style={{ fontSize: 13, color: "#777" }}>불러오는 중…</div>
+                ) : searchedBooks.length === 0 ? (
+                  <div style={{ fontSize: 13, color: "#777" }}>검색 결과가 없어요.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {searchedBooks.map((book) => {
+                      const checked = selectedBooks.has(book);
+                      return (
+                        <div
+                          key={book}
+                          style={{
+                            border: "1px solid #ffe1ec",
+                            borderRadius: 10,
+                            padding: 10,
+                            background: checked ? "#fff0f5" : "#fff",
+                          }}
+                        >
+                          <label style={{ fontWeight: 900, cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleBook(book)}
+                            />{" "}
+                            {book}
+                          </label>
+
+                          {checked && (
+                            <input
+                              style={{ ...fieldStyle, marginTop: 8 }}
+                              value={chaptersByBook[book] || ""}
+                              onChange={(e) =>
+                                setChaptersByBook((m) => ({
+                                  ...m,
+                                  [book]: e.target.value,
+                                }))
+                              }
+                              placeholder="예: 4-8, 10"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 8, fontSize: 12, color: "#777" }}>
+                  * 여기서 체크한 책도 아래 “선택한 책 목록”에 자동 반영돼요.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ======= 아래는 기존 그대로 ======= */}
+
+          <h3 style={{ marginTop: 16 }}>분류 선택</h3>
           <div style={{ maxHeight: 260, overflow: "auto" }}>
             {loading ? "불러오는 중…" : renderTree(null)}
           </div>

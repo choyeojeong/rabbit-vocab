@@ -15,7 +15,12 @@ export default function BackButton({ fallback = "/dashboard", hide = false }) {
       onClick={goBack}
       style={{
         position: "fixed",
-        top: 10,
+
+        // ✅ iPhone safe-area(노치) 만큼 아래로 자동 보정
+        // - 지원 시: top = safe-area + 10px
+        // - 미지원 시: top = 10px
+        top: "calc(env(safe-area-inset-top, 0px) + 10px)",
+
         left: 12,
         zIndex: 99998,
         height: 34,

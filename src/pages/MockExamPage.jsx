@@ -34,12 +34,12 @@ function useQuery() {
 
 /**
  * selections 정규화
- * - 다중: loc.state.selections = [{ book, chapters }] (권장)
+ * - 다중: loc.state.selections = [{ book, chaptersText }]  (BookRangePage에서 넘어오는 형태)
  * - 레거시 단일: book + chapters/start/end 지원
  */
 function normalizeSelections({ locState, query }) {
   const qBook = query.get('book') || '';
-  const qChapters = query.get('chapters');
+  const qChapters = query.get('chapters'); // "4-8,10,12"
   const qStart = query.get('start');
   const qEnd = query.get('end');
 
@@ -58,21 +58,22 @@ function normalizeSelections({ locState, query }) {
 
   const rawSelections = ensureArray(locState?.selections);
 
+  // ✅ 다중 selections 우선
   if (rawSelections.length) {
     const normalized = rawSelections
       .map((s) => {
         const book = (s?.book || '').trim();
         if (!book) return null;
 
-        let chapters = [];
-        if (Array.isArray(s?.chapters)) chapters = s.chapters.filter((n) => Number.isFinite(Number(n))).map(Number);
-        else if (typeof s?.chapters === 'string') chapters = parseChapterInput(s.chapters);
-        else chapters = [];
+        // BookRangePage는 chaptersText를 넘김
+        const chaptersText = (s?.chaptersText ?? s?.chapters ?? '').toString().trim();
+        const chapters = chaptersText ? parseChapterInput(chaptersText) : [];
 
+        // 혹시 start/end로 넘어오는 형태도 지원
         const start = Number(s?.start);
         const end = Number(s?.end);
 
-        return { book, chapters, start, end, raw: s };
+        return { book, chaptersText, chapters, start, end, raw: s };
       })
       .filter(Boolean);
 
@@ -80,7 +81,18 @@ function normalizeSelections({ locState, query }) {
   }
 
   if (!legacy.book) return { mode: 'none', selections: [], legacy };
-  return { mode: 'single', selections: [{ book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, raw: null }], legacy };
+  return {
+    mode: 'single',
+    selections: [{
+      book: legacy.book,
+      chaptersText: legacy._rawChaptersParam || '',
+      chapters: legacy.chapters,
+      start: legacy.start,
+      end: legacy.end,
+      raw: null
+    }],
+    legacy
+  };
 }
 
 function selectionToText(sel, legacyRawChaptersParam = '') {
@@ -88,7 +100,8 @@ function selectionToText(sel, legacyRawChaptersParam = '') {
   const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
   const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
-  if (chapters.length) return `${book} (${chapters.join(', ')})`;
+  // ✅ 다중책은 chaptersText를 그대로 보여주는 게 사용자가 입력한 범위와 일치
+  if (chapters.length) return `${book} (${sel.chaptersText || chapters.join(', ')})`;
   if (legacyRawChaptersParam && !chapters.length) return `${book} (${legacyRawChaptersParam})`;
   if (hasRange) return `${book} (${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)}강)`;
   return `${book}`;
@@ -149,34 +162,40 @@ export default function MockExamPage() {
     let mounted = true;
 
     (async () => {
-      if (mode === 'none' || !selections.length) {
-        if (mounted) setWords([]);
-        return;
-      }
-
-      const chunks = [];
-      for (const sel of selections) {
-        const book = sel.book;
-        const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
-        const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
-
-        let range = [];
-
-        if (chapters.length > 0) {
-          range = await fetchWordsByChapters(book, chapters);
-        } else if (hasRange) {
-          range = await fetchWordsInRange(book, sel.start, sel.end);
-        } else {
-          range = [];
+      try {
+        if (mode === 'none' || !selections.length) {
+          if (mounted) setWords([]);
+          return;
         }
 
-        const withBook = (range || []).map((w) => ({ ...w, book: w.book || book }));
-        chunks.push(...withBook);
-      }
+        const chunks = [];
+        for (const sel of selections) {
+          const book = sel.book;
+          const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
+          const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
-      if (!mounted) return;
-      setWords(chunks || []);
-      // config 화면에 있을 때만 상태 강제 초기화는 하지 않음(사용자 설정 유지)
+          let range = [];
+
+          if (chapters.length > 0) {
+            range = await fetchWordsByChapters(book, chapters);
+          } else if (hasRange) {
+            range = await fetchWordsInRange(book, sel.start, sel.end);
+          } else {
+            range = [];
+          }
+
+          const withBook = (range || []).map((w) => ({ ...w, book: w.book || book }));
+          chunks.push(...withBook);
+        }
+
+        if (!mounted) return;
+        setWords(chunks || []);
+        // config 화면에 있을 때만 상태 강제 초기화는 하지 않음(사용자 설정 유지)
+      } catch (e) {
+        console.error('MockExamPage: load failed', e);
+        if (!mounted) return;
+        setWords([]);
+      }
     })();
 
     return () => { mounted = false; };

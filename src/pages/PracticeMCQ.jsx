@@ -55,12 +55,12 @@ function SpeakerIcon({ size = 18 }) {
 
 /**
  * selections 정규화
- * - 다중 책: loc.state.selections = [{ book, chapters }] 권장
+ * - 다중 책: loc.state.selections = [{ book, chaptersText }] (BookRangePage에서 넘어오는 형태)
  * - 레거시(단일): book + (chapters|start/end) 호환
  */
 function normalizeSelections({ locState, query }) {
   const qBook = query.get('book') || '';
-  const qChapters = query.get('chapters');
+  const qChapters = query.get('chapters'); // "4-8,10,12"
   const qStart = query.get('start');
   const qEnd = query.get('end');
 
@@ -79,25 +79,23 @@ function normalizeSelections({ locState, query }) {
 
   const rawSelections = ensureArray(locState?.selections);
 
-  // 다중 selections 우선
+  // ✅ 다중 selections 우선
   if (rawSelections.length) {
     const normalized = rawSelections
       .map((s) => {
         const book = (s?.book || '').trim();
         if (!book) return null;
 
-        // chapters: number[] | "4-8,10" | null
-        let chapters = [];
-        if (Array.isArray(s?.chapters)) chapters = s.chapters.filter((n) => Number.isFinite(Number(n))).map(Number);
-        else if (typeof s?.chapters === 'string') chapters = parseChapterInput(s.chapters);
-        else chapters = [];
+        // BookRangePage는 chaptersText를 넘김
+        const chaptersText = (s?.chaptersText ?? s?.chapters ?? '').toString().trim();
+        const chapters = chaptersText ? parseChapterInput(chaptersText) : [];
 
-        // 혹시 start/end 형태가 들어오면 지원
         const start = Number(s?.start);
         const end = Number(s?.end);
 
         return {
           book,
+          chaptersText,
           chapters,
           start,
           end,
@@ -106,13 +104,23 @@ function normalizeSelections({ locState, query }) {
       })
       .filter(Boolean);
 
-    // selections가 비어버리면 legacy로 폴백
     if (normalized.length) return { mode: 'multi', selections: normalized, legacy };
   }
 
   // 레거시 단일
   if (!legacy.book) return { mode: 'none', selections: [], legacy };
-  return { mode: 'single', selections: [ { book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, raw: null } ], legacy };
+  return {
+    mode: 'single',
+    selections: [{
+      book: legacy.book,
+      chaptersText: legacy._rawChaptersParam || '',
+      chapters: legacy.chapters,
+      start: legacy.start,
+      end: legacy.end,
+      raw: null
+    }],
+    legacy
+  };
 }
 
 // 표시용: 각 selection 요약 텍스트
@@ -121,7 +129,7 @@ function selectionToText(sel, legacyRawChaptersParam = '') {
   const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
   const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
-  if (chapters.length) return `${book} (${chapters.join(', ')})`;
+  if (chapters.length) return `${book} (${sel.chaptersText || chapters.join(', ')})`;
   if (legacyRawChaptersParam && !chapters.length) return `${book} (${legacyRawChaptersParam})`;
   if (hasRange) return `${book} (${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)}강)`;
   return `${book}`;
@@ -194,12 +202,14 @@ export default function PracticeMCQ() {
           } else if (hasRange) {
             range = await fetchWordsInRange(book, sel.start, sel.end);
           } else {
-            // 예외: 범위 정보가 없는 selection이면, 최소한 book 전체를 문제로 쓰지는 않고 빈 처리
             range = [];
           }
 
-          // book 필드 보장(혹시 fetch 함수가 book을 안 넣는 경우 대비)
-          const withBook = (range || []).map((w) => ({ ...w, book: w.book || book }));
+          const withBook = (range || []).map((w) => ({
+            ...w,
+            book: w.book || book, // ✅ book 필드 보장
+          }));
+
           chunks.push(...withBook);
         }
 
@@ -219,7 +229,9 @@ export default function PracticeMCQ() {
         for (const b of uniqueBooks) {
           try {
             const pool = await fetchWordsInBook(b);
-            poolMap[b] = (pool && pool.length) ? pool.map((w) => ({ ...w, book: w.book || b })) : [];
+            poolMap[b] = (pool && pool.length)
+              ? pool.map((w) => ({ ...w, book: w.book || b }))
+              : [];
           } catch (e) {
             console.warn('MCQ: book pool load failed for', b, e);
             poolMap[b] = [];

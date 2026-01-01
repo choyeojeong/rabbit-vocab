@@ -30,7 +30,7 @@ function useQuery() {
 
 /**
  * selections 정규화
- * - 다중: loc.state.selections = [{ book, chapters }] (권장)
+ * - 다중: loc.state.selections = [{ book, chaptersText }]  ✅(현재 BookRangePage 형태)
  * - 레거시 단일: book + chapters/start/end 지원
  */
 function normalizeSelections({ locState, query }) {
@@ -54,21 +54,32 @@ function normalizeSelections({ locState, query }) {
 
   const rawSelections = ensureArray(locState?.selections);
 
+  // ✅ 다중 selections 우선 처리
   if (rawSelections.length) {
     const normalized = rawSelections
       .map((s) => {
         const book = (s?.book || '').trim();
         if (!book) return null;
 
+        // ✅ BookRangePage는 chaptersText를 넘김
+        const chaptersText = (s?.chaptersText ?? s?.chapters ?? '').toString().trim();
+
+        // chapters 배열 만들기
         let chapters = [];
-        if (Array.isArray(s?.chapters)) chapters = s.chapters.filter((n) => Number.isFinite(Number(n))).map(Number);
-        else if (typeof s?.chapters === 'string') chapters = parseChapterInput(s.chapters);
-        else chapters = [];
+        if (Array.isArray(s?.chapters)) {
+          chapters = s.chapters
+            .filter((n) => Number.isFinite(Number(n)))
+            .map(Number);
+        } else if (chaptersText) {
+          chapters = parseChapterInput(chaptersText);
+        } else {
+          chapters = [];
+        }
 
         const start = Number(s?.start);
         const end = Number(s?.end);
 
-        return { book, chapters, start, end, raw: s };
+        return { book, chaptersText, chapters, start, end, raw: s };
       })
       .filter(Boolean);
 
@@ -76,7 +87,19 @@ function normalizeSelections({ locState, query }) {
   }
 
   if (!legacy.book) return { mode: 'none', selections: [], legacy };
-  return { mode: 'single', selections: [{ book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, raw: null }], legacy };
+
+  return {
+    mode: 'single',
+    selections: [{
+      book: legacy.book,
+      chaptersText: legacy._rawChaptersParam || '',
+      chapters: legacy.chapters,
+      start: legacy.start,
+      end: legacy.end,
+      raw: null
+    }],
+    legacy
+  };
 }
 
 function selectionToText(sel, legacyRawChaptersParam = '') {
@@ -84,7 +107,8 @@ function selectionToText(sel, legacyRawChaptersParam = '') {
   const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
   const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
-  if (chapters.length) return `${book} (${chapters.join(', ')})`;
+  // ✅ chaptersText가 있으면 사용자가 입력한 그대로 보여주기
+  if (chapters.length) return `${book} (${sel.chaptersText || chapters.join(', ')})`;
   if (legacyRawChaptersParam && !chapters.length) return `${book} (${legacyRawChaptersParam})`;
   if (hasRange) return `${book} (${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)})`;
   return `${book}`;
@@ -253,26 +277,36 @@ export default function OfficialExamPage() {
 
   // ✅ 다중책용: chapters_text 생성 (책별 범위를 문자열로 저장)
   function computeChaptersTextFromSelections() {
-    const parts = (selections || []).map((sel) => {
-      const book = sel.book;
-      const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
-      const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
+    const parts = (selections || [])
+      .map((sel) => {
+        const book = (sel?.book || '').trim();
+        if (!book) return null;
 
-      let rangeText = '';
-      if (chapters.length) rangeText = chapters.join(', ');
-      else if (sel?.raw && typeof sel.raw?.chapters === 'string' && sel.raw.chapters.trim()) rangeText = sel.raw.chapters.trim();
-      else if (legacy._rawChaptersParam && book === legacy.book && !chapters.length) rangeText = legacy._rawChaptersParam.trim();
-      else if (hasRange) rangeText = `${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)}`;
-      else rangeText = '미지정';
+        const chapters = ensureArray(sel.chapters)
+          .filter((n) => Number.isFinite(Number(n)))
+          .map(Number);
 
-      return `${book}:${rangeText}`;
-    }).filter(Boolean);
+        const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
+
+        // ✅ chaptersText 우선(사용자 입력 보존)
+        let rangeText = (sel?.chaptersText || '').trim();
+
+        if (!rangeText) {
+          if (chapters.length) rangeText = chapters.join(', ');
+          else if (sel?.raw && typeof sel.raw?.chapters === 'string' && sel.raw.chapters.trim()) rangeText = sel.raw.chapters.trim();
+          else if (legacy._rawChaptersParam && book === legacy.book && !chapters.length) rangeText = legacy._rawChaptersParam.trim();
+          else if (hasRange) rangeText = `${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)}`;
+          else rangeText = '미지정';
+        }
+
+        return `${book}:${rangeText}`;
+      })
+      .filter(Boolean);
 
     return parts.join(' | ');
   }
 
   // ✅ 세션 테이블 호환을 위해 chapter_start/end는 "전체 선택 범위의 최소~최대(챕터)"로 저장
-  // (다중 책이라 정확한 의미는 약해지지만, 기존 컬럼을 깨지 않기 위한 호환값)
   function computeGlobalChapterBoundsFromWords() {
     const chs = (words || [])
       .map((w) => Number(w?.chapter))
@@ -297,7 +331,6 @@ export default function OfficialExamPage() {
 
     const chosen = sampleN(words, n);
 
-    // ✅ 다중책: chapters_text는 selections 기반
     let bounds, chaptersText;
     try {
       bounds = computeGlobalChapterBoundsFromWords();
@@ -329,7 +362,7 @@ export default function OfficialExamPage() {
         student_id: me?.id,
         student_name: profileName,
         teacher_name: profileTeacher,
-        // ✅ 다중책에서도 book 컬럼을 비우지 않기 위해 "첫 책"을 대표로 저장
+        // ✅ 대표 book(첫 선택) - 기존 컬럼 호환
         book: selections?.[0]?.book || legacy.book || null,
         chapters_text: chaptersText,
         chapter_start: bounds.chapter_start,
@@ -440,6 +473,7 @@ export default function OfficialExamPage() {
     answerRef.current = '';
 
     if (i + 1 >= seq.length) {
+      // ✅ 마지막 문항 누락 방지 패턴 유지
       finalizeAndSend(next);
     } else {
       setI((x) => x + 1);
@@ -489,6 +523,7 @@ export default function OfficialExamPage() {
           }])
           .select('id')
           .single();
+
         if (error) throw error;
         sid = data?.id || null;
         setSessionId(sid);
@@ -563,7 +598,12 @@ export default function OfficialExamPage() {
   }
 
   // config 화면 표시용: 현재 선택 요약
-  const rangeTextForConfig = headerText || selectionToText(selections?.[0] || { book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end }, legacy._rawChaptersParam);
+  const rangeTextForConfig =
+    headerText ||
+    selectionToText(
+      selections?.[0] || { book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, chaptersText: legacy._rawChaptersParam },
+      legacy._rawChaptersParam
+    );
 
   // exam 화면 표시용: 현재 문항 book/chapter
   const currentMetaText = useMemo(() => {
@@ -646,7 +686,11 @@ export default function OfficialExamPage() {
                     onChange={(e) => setAnswer(e.target.value)}
                     onCompositionStart={() => setIsComposing(true)}
                     onCompositionEnd={(e) => { setIsComposing(false); setAnswer(e.currentTarget.value); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { if (!isComposing) submitCurrent(answer); } }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        if (!isComposing) submitCurrent(answer);
+                      }
+                    }}
                     autoCapitalize="none"
                     autoCorrect="off"
                   />
