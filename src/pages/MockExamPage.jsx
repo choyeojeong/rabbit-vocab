@@ -215,9 +215,9 @@ function selectionToText(sel, legacyRawChaptersParam = '') {
 }
 
 /**
- * ✅ 오답 단어 로드
- * - 1차: wrong_book_items에서 단어 정보를 직접 가져오려고 시도
- * - 2차(폴백): wrong_book_items에 word_id만 있을 수도 있으니 vocab_words로 재조회
+ * ✅ 오답 단어 로드 (FIXED)
+ * - wrong_book_items 스키마에는 book/chapter 없음
+ * - meaning_ko가 비어있는 경우 vocab_words로 폴백해서 채움
  */
 async function fetchWrongWords(wrongBookIds) {
   const ids = ensureArray(wrongBookIds).filter(Boolean);
@@ -225,8 +225,9 @@ async function fetchWrongWords(wrongBookIds) {
 
   const { data: items, error: e1 } = await supabase
     .from('wrong_book_items')
-    .select('wrong_book_id, word_id, term_en, meaning_ko, book, chapter, pos, accepted_ko')
-    .in('wrong_book_id', ids);
+    .select('wrong_book_id, word_id, term_en, meaning_ko, pos, accepted_ko')
+    .in('wrong_book_id', ids)
+    .order('created_at', { ascending: true });
 
   if (e1) {
     console.warn('[wrong_book_items select fail]', e1);
@@ -234,42 +235,56 @@ async function fetchWrongWords(wrongBookIds) {
   }
 
   const rows = items || [];
+  if (!rows.length) return [];
 
-  const hasFull = rows.some((r) => r?.term_en && r?.meaning_ko);
-  if (hasFull) {
-    return rows
-      .map((r) => ({
-        id: r.word_id || r.id || null,
-        word_id: r.word_id || null,
-        term_en: r.term_en,
-        meaning_ko: r.meaning_ko,
-        book: r.book || '오답',
-        chapter: r.chapter ?? null,
-        pos: r.pos ?? null,
-        accepted_ko: r.accepted_ko ?? null,
-      }))
-      .filter((w) => w.term_en && w.meaning_ko);
-  }
+  // meaning_ko가 비어있는 항목은 vocab_words로 채움
+  const needFillIds = rows
+    .filter((r) => !r?.meaning_ko || String(r.meaning_ko).trim() === '')
+    .map((r) => r.word_id)
+    .filter(Boolean);
 
-  const wordIds = Array.from(new Set(rows.map((r) => r.word_id).filter(Boolean)));
-  if (!wordIds.length) return [];
+  let vocabMap = new Map();
+  if (needFillIds.length) {
+    const uniq = Array.from(new Set(needFillIds));
+    const chunkSize = 200;
+    for (let i = 0; i < uniq.length; i += chunkSize) {
+      const slice = uniq.slice(i, i + chunkSize);
+      const { data, error } = await supabase
+        .from('vocab_words')
+        .select('id, book, chapter, term_en, meaning_ko, pos, accepted_ko')
+        .in('id', slice);
 
-  const chunkSize = 200;
-  const out = [];
-  for (let i = 0; i < wordIds.length; i += chunkSize) {
-    const slice = wordIds.slice(i, i + chunkSize);
-    const { data, error } = await supabase
-      .from('vocab_words')
-      .select('id, book, chapter, term_en, meaning_ko, pos, accepted_ko')
-      .in('id', slice);
-    if (error) {
-      console.warn('[vocab_words fallback fail]', error);
-      continue;
+      if (error) {
+        console.warn('[vocab_words fallback fail]', error);
+        continue;
+      }
+      for (const w of data || []) vocabMap.set(w.id, w);
     }
-    out.push(...(data || []));
   }
 
-  return out.map((w) => ({ ...w, word_id: w.id }));
+  const normalized = rows
+    .map((r) => {
+      const vw = vocabMap.get(r.word_id);
+
+      const term_en = r.term_en || vw?.term_en || '';
+      const meaning_ko = r.meaning_ko || vw?.meaning_ko || '';
+      const pos = r.pos ?? vw?.pos ?? null;
+      const accepted_ko = r.accepted_ko ?? vw?.accepted_ko ?? null;
+
+      return {
+        id: r.word_id || null,
+        word_id: r.word_id || null,
+        term_en,
+        meaning_ko,
+        pos,
+        accepted_ko,
+        book: vw?.book || '오답',
+        chapter: vw?.chapter ?? null,
+      };
+    })
+    .filter((w) => w.term_en && w.meaning_ko); // ✅ 시험/채점은 meaning_ko 필요
+
+  return normalized;
 }
 
 export default function MockExamPage() {

@@ -1,5 +1,13 @@
 // src/App.jsx
-import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useParams,
+  useNavigate,
+  useLocation,
+} from "react-router-dom";
 import { useEffect, useState } from "react";
 
 // 공개
@@ -134,6 +142,37 @@ function LoginGate({ children }) {
 }
 
 /* =========================
+   ✅ /official 진입 게이트
+   - loc.state.wrong_book_ids가 있으면 /exam/official로 자동 이동
+   - 일반 진입이면 BookRangePage(official mode) 보여줌
+========================= */
+function OfficialEntryGate() {
+  const loc = useLocation();
+  const nav = useNavigate();
+
+  useEffect(() => {
+    const raw = loc.state?.wrong_book_ids;
+
+    const wrongIds = Array.isArray(raw)
+      ? raw
+      : raw
+      ? [raw]
+      : [];
+
+    const cleaned = wrongIds.filter(Boolean);
+
+    if (cleaned.length) {
+      nav("/exam/official", {
+        replace: true,
+        state: { wrong_book_ids: cleaned },
+      });
+    }
+  }, [loc.state, nav]);
+
+  return <BookRangePage mode="official" />;
+}
+
+/* =========================
    App Router
 ========================= */
 export default function App() {
@@ -194,14 +233,17 @@ export default function App() {
             </Protected>
           }
         />
+
+        {/* ✅ 공식시험 진입(오답이면 자동으로 /exam/official) */}
         <Route
           path="/official"
           element={
             <Protected>
-              <BookRangePage mode="official" />
+              <OfficialEntryGate />
             </Protected>
           }
         />
+
         <Route
           path="/exam/official"
           element={
@@ -229,10 +271,7 @@ export default function App() {
         />
 
         {/* ✅ 구버전 단수 경로도 살려두기 */}
-        <Route
-          path="/exam/official/result/:id"
-          element={<LegacyOfficialResultRedirect />}
-        />
+        <Route path="/exam/official/result/:id" element={<LegacyOfficialResultRedirect />} />
 
         {/* 관리자 / 교사 */}
         <Route element={<AdminGate />}>
@@ -250,27 +289,15 @@ export default function App() {
           <Route path="/admin/wrongs" element={<WrongBooksAdminPage />} />
 
           {/* ✅ 단어책 분류(신규) */}
-          <Route
-            path="/teacher/book-categories"
-            element={<BookCategoryManagePage />}
-          />
-          <Route
-            path="/teacher/book-categorize"
-            element={<BookCategorizePage />}
-          />
+          <Route path="/teacher/book-categories" element={<BookCategoryManagePage />} />
+          <Route path="/teacher/book-categorize" element={<BookCategorizePage />} />
 
           {/* admin alias */}
           <Route path="/admin/users" element={<TeacherManagePage />} />
           <Route path="/admin/csv" element={<CsvManagePage />} />
           <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
-          <Route
-            path="/admin/book-categories"
-            element={<BookCategoryManagePage />}
-          />
-          <Route
-            path="/admin/book-categorize"
-            element={<BookCategorizePage />}
-          />
+          <Route path="/admin/book-categories" element={<BookCategoryManagePage />} />
+          <Route path="/admin/book-categorize" element={<BookCategorizePage />} />
         </Route>
 
         {/* fallback */}
