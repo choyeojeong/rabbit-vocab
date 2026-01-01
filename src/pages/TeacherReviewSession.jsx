@@ -7,6 +7,23 @@ import { supabase } from "../utils/supabaseClient";
 
 dayjs.locale("ko");
 
+const THEME = {
+  pageBg: "transparent", // ✅ AdminGate 배경을 그대로 사용
+  cardBg: "#ffffff",
+  text: "#1f2a44",
+  sub: "#5d6b82",
+  border: "#e9eef5",
+  borderPink: "#ffd3e3",
+  pink: "#ff6fa3",
+  pinkSoft: "#fff0f5",
+  link: "#2b59ff",
+  danger: "#b00020",
+  okSoft: "#e9fff2",
+  okText: "#0f7a3a",
+  badSoft: "#fff1f2",
+  badText: "#b00020",
+};
+
 export default function TeacherReviewSession() {
   const { id: sessionId } = useParams(); // /teacher/review/:id
   const navigate = useNavigate();
@@ -99,7 +116,6 @@ export default function TeacherReviewSession() {
 
   // 🔒 유틸: final_ok 저장 (다건 업데이트)
   async function persistFinalOk(updates) {
-    // 가장 안전한 방법: 개별 UPDATE (왕복은 늘지만 확실함)
     const chunkSize = 50;
     for (let i = 0; i < updates.length; i += chunkSize) {
       const slice = updates.slice(i, i + chunkSize);
@@ -158,7 +174,7 @@ export default function TeacherReviewSession() {
       const wrong = Math.max(0, totalQuestions - correct);
       const willPass = wrong <= cutoffMiss;
 
-      // ③ 레거시 RPC 호출: finalize_test_session(_id, _final_score, _final_pass)
+      // ③ 레거시 RPC 호출
       const { error: rpcError } = await supabase.rpc("finalize_test_session", {
         _id: sessionId,
         _final_score: correct,
@@ -175,10 +191,9 @@ export default function TeacherReviewSession() {
         return;
       }
 
-      // 프론트 상태도 finalized로 갱신 (사용자 혼란 방지)
       setSession((prev) => (prev ? { ...prev, status: "finalized" } : prev));
 
-      // ④ ✅ 오답파일 생성 (실패 시: 확정은 완료됐으니 재시도 안내)
+      // ④ ✅ 오답파일 생성
       try {
         await createWrongBook(sessionId);
       } catch (e) {
@@ -190,7 +205,7 @@ export default function TeacherReviewSession() {
         setError(
           `※ 최종 확정은 완료됐지만, 오답 파일 생성이 실패했어요.\n${msg}\n(페이지에서 다시 '최종 확정'을 눌러 재시도할 수 있어요.)`
         );
-        return; // ✅ 여기서 멈춰서 재시도 가능하게
+        return;
       }
 
       // 완료 이동
@@ -204,64 +219,151 @@ export default function TeacherReviewSession() {
   }
 
   if (loading) {
-    return <div style={{ padding: 24 }}>불러오는 중…</div>;
+    return (
+      <div style={{ padding: 24, color: THEME.text }}>
+        불러오는 중…
+      </div>
+    );
   }
 
+  const totalQuestions = Number.isFinite(session?.num_questions)
+    ? session.num_questions
+    : items.length;
+  const correct = items.filter((i) => !!i.final_ok).length;
+  const cutoffMiss = Number.isFinite(session?.cutoff_miss) ? session.cutoff_miss : 0;
+  const wrong = Math.max(0, totalQuestions - correct);
+  const willPass = wrong <= cutoffMiss;
+
   return (
-    <div style={{ background: "#fff5f8", minHeight: "100vh", padding: "24px 12px" }}>
+    <div
+      style={{
+        background: THEME.pageBg,
+        minHeight: "100vh",
+        padding: "24px 12px",
+        color: THEME.text,
+      }}
+    >
       <div
         style={{
           maxWidth: 980,
           margin: "0 auto",
-          background: "white",
+          background: THEME.cardBg,
           borderRadius: 16,
           padding: 24,
-          boxShadow: "0 10px 30px rgba(255,111,163,.18)",
+          border: `1px solid ${THEME.border}`,
+          boxShadow: "0 10px 30px rgba(31,42,68,.08)",
         }}
       >
         {/* 헤더 */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-          <h2 style={{ margin: 0, color: "#ff6fa3" }}>
-            세션 검수 · {session?.student_name}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <h2 style={{ margin: 0, color: THEME.text, fontWeight: 900 }}>
+              세션 검수 · {session?.student_name}
+            </h2>
+
             {session?.status === "finalized" && (
               <span
                 style={{
-                  marginLeft: 10,
-                  fontSize: 13,
-                  padding: "4px 8px",
-                  borderRadius: 8,
-                  background: "#ffe4ef",
+                  fontSize: 12,
+                  padding: "5px 10px",
+                  borderRadius: 999,
+                  background: THEME.pinkSoft,
                   color: "#c94a7a",
+                  border: `1px solid ${THEME.borderPink}`,
+                  fontWeight: 900,
                 }}
               >
                 확정됨
               </span>
             )}
-          </h2>
-          <Link to="/teacher/review" style={{ color: "#4361ee", textDecoration: "none" }}>
+
+            {/* ✅ 점수 요약 배지 */}
+            {items.length > 0 && (
+              <span
+                style={{
+                  fontSize: 12,
+                  padding: "5px 10px",
+                  borderRadius: 999,
+                  background: willPass ? THEME.okSoft : THEME.badSoft,
+                  color: willPass ? THEME.okText : THEME.badText,
+                  border: `1px solid ${THEME.border}`,
+                  fontWeight: 900,
+                }}
+                title={`정답 ${correct}/${totalQuestions} · 오답 ${wrong}개 (컷 ${cutoffMiss}개)`}
+              >
+                {correct}/{totalQuestions} · 오답 {wrong} · 컷 {cutoffMiss} ·{" "}
+                {willPass ? "PASS" : "FAIL"}
+              </span>
+            )}
+          </div>
+
+          <Link
+            to="/teacher/review"
+            style={{
+              color: THEME.link,
+              textDecoration: "none",
+              fontWeight: 900,
+            }}
+          >
             ← 목록으로
           </Link>
         </div>
-        <div style={{ marginTop: 6, color: "#7e7e7e" }}>{header}</div>
+
+        <div style={{ marginTop: 6, color: THEME.sub, fontSize: 13 }}>{header}</div>
 
         {/* 일괄 버튼 */}
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 16 }}>
-          <button className="btn-pink" onClick={setFromAuto} disabled={items.length === 0 || saving}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+          <button
+            className="btn-pink"
+            onClick={setFromAuto}
+            disabled={items.length === 0 || saving}
+          >
             자동채점값으로 초기화
           </button>
-          <button className="btn-pink" onClick={() => setAll(true)} disabled={items.length === 0 || saving}>
+          <button
+            className="btn-ghost"
+            onClick={() => setAll(true)}
+            disabled={items.length === 0 || saving}
+          >
             모두 정답 처리
           </button>
-          <button className="btn-pink" onClick={() => setAll(false)} disabled={items.length === 0 || saving}>
+          <button
+            className="btn-ghost"
+            onClick={() => setAll(false)}
+            disabled={items.length === 0 || saving}
+          >
             모두 오답 처리
           </button>
-          <button className="btn-pink" onClick={finalize} disabled={saving || items.length === 0}>
+          <button
+            className="btn-pink"
+            onClick={finalize}
+            disabled={saving || items.length === 0}
+          >
             {saving ? "처리 중…" : "최종 확정"}
           </button>
         </div>
 
         {error && (
-          <div style={{ marginTop: 12, color: "#d00", whiteSpace: "pre-line" }}>
+          <div
+            style={{
+              marginTop: 12,
+              background: "#fff1f2",
+              border: "1px solid #fecdd3",
+              color: "#9f1239",
+              padding: 12,
+              borderRadius: 12,
+              whiteSpace: "pre-line",
+              fontWeight: 800,
+            }}
+          >
             {error}
           </div>
         )}
@@ -269,49 +371,136 @@ export default function TeacherReviewSession() {
         {/* 문항 리스트 */}
         <div style={{ marginTop: 20 }}>
           {items.length === 0 ? (
-            <div style={{ padding: 16, background: "#fff0f4", borderRadius: 12 }}>
-              이 세션에는 저장된 문항이 없습니다.
-              <div style={{ marginTop: 6, fontSize: 13, color: "#777" }}>
-                ※ 점검: (1) 세션 ID 확인 (2) 시험 저장 시 <code>test_items</code> insert 누락 (3) RLS/권한
+            <div
+              style={{
+                padding: 16,
+                background: "#f3f6fb",
+                borderRadius: 12,
+                border: `1px solid ${THEME.border}`,
+                color: THEME.text,
+              }}
+            >
+              <div style={{ fontWeight: 900 }}>이 세션에는 저장된 문항이 없습니다.</div>
+              <div style={{ marginTop: 6, fontSize: 13, color: THEME.sub }}>
+                ※ 점검: (1) 세션 ID 확인 (2) 시험 저장 시{" "}
+                <code
+                  style={{
+                    background: "#eef2ff",
+                    border: "1px solid #c7d2fe",
+                    padding: "1px 6px",
+                    borderRadius: 8,
+                    color: "#3730a3",
+                    fontWeight: 800,
+                  }}
+                >
+                  test_items
+                </code>{" "}
+                insert 누락 (3) RLS/권한
               </div>
             </div>
           ) : (
-            items.map((it, i) => (
-              <div
-                key={it.id}
-                style={{
-                  border: "1px solid #ffe0eb",
-                  borderRadius: 12,
-                  padding: 14,
-                  marginBottom: 10,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                  <div style={{ fontWeight: 700 }}>
-                    {i + 1}. {it.term_en}
+            items.map((it, i) => {
+              const isOk = !!it.final_ok;
+              return (
+                <div
+                  key={it.id}
+                  style={{
+                    border: `1px solid ${isOk ? "#bbf7d0" : "#fecdd3"}`,
+                    background: isOk ? "#f0fdf4" : "#fff1f2",
+                    borderRadius: 12,
+                    padding: 14,
+                    marginBottom: 10,
+                    color: THEME.text,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, fontSize: 15 }}>
+                      {i + 1}. {it.term_en}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {/* 자동채점 배지 */}
+                      <span
+                        style={{
+                          fontSize: 12,
+                          padding: "4px 8px",
+                          borderRadius: 999,
+                          border: `1px solid ${THEME.border}`,
+                          background: "#fff",
+                          color: THEME.sub,
+                          fontWeight: 900,
+                        }}
+                        title="자동채점 결과"
+                      >
+                        자동 {it.auto_ok ? "O" : "X"}
+                      </span>
+
+                      {/* 최종 배지 */}
+                      <span
+                        style={{
+                          fontSize: 12,
+                          padding: "4px 8px",
+                          borderRadius: 999,
+                          border: `1px solid ${THEME.border}`,
+                          background: "#fff",
+                          color: isOk ? THEME.okText : THEME.badText,
+                          fontWeight: 900,
+                        }}
+                        title="현재 최종 판정"
+                      >
+                        최종 {isOk ? "O" : "X"}
+                      </span>
+
+                      <label
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                          cursor: saving ? "not-allowed" : "pointer",
+                          fontWeight: 900,
+                          color: THEME.text,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!it.final_ok}
+                          onChange={() => toggleItem(it.id)}
+                          disabled={saving}
+                        />
+                        최종 정답
+                      </label>
+                    </div>
                   </div>
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={!!it.final_ok}
-                      onChange={() => toggleItem(it.id)}
-                      disabled={saving}
-                    />
-                    최종 정답
-                  </label>
+
+                  <div style={{ marginTop: 8, fontSize: 14, lineHeight: 1.55 }}>
+                    <div>
+                      <b style={{ color: THEME.text }}>정답(ko):</b>{" "}
+                      <span style={{ color: THEME.text }}>{it.meaning_ko}</span>
+                    </div>
+                    <div style={{ marginTop: 2 }}>
+                      <b style={{ color: THEME.text }}>학생답안:</b>{" "}
+                      {it.student_answer ? (
+                        <span style={{ color: THEME.text }}>{it.student_answer}</span>
+                      ) : (
+                        <em style={{ color: THEME.sub, fontStyle: "italic" }}>—</em>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: THEME.sub, marginTop: 6 }}>
+                      자동채점: {it.auto_ok ? "O" : "X"} · 현재최종:{" "}
+                      {it.final_ok ? "O" : "X"}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ marginTop: 6, fontSize: 14, lineHeight: 1.5 }}>
-                  <div><b>정답(ko):</b> {it.meaning_ko}</div>
-                  <div>
-                    <b>학생답안:</b>{" "}
-                    {it.student_answer ? it.student_answer : <em style={{ color: "#9a9a9a" }}>—</em>}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
-                    자동채점: {it.auto_ok ? "O" : "X"} · 현재최종: {it.final_ok ? "O" : "X"}
-                  </div>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -319,16 +508,28 @@ export default function TeacherReviewSession() {
       {/* 버튼 스타일 */}
       <style>{`
         .btn-pink {
-          background: #ff6fa3;
-          color: white;
+          background: ${THEME.pink};
+          color: #fff;
           border: none;
           padding: 10px 14px;
           border-radius: 10px;
-          font-weight: 700;
-          box-shadow: 0 6px 14px rgba(255,111,163,.25);
+          font-weight: 900;
+          box-shadow: 0 10px 22px rgba(255,111,163,.18);
           cursor: pointer;
         }
         .btn-pink:disabled { opacity: .6; cursor: not-allowed; }
+
+        .btn-ghost {
+          background: #fff;
+          color: ${THEME.text};
+          border: 1px solid ${THEME.borderPink};
+          padding: 10px 14px;
+          border-radius: 10px;
+          font-weight: 900;
+          box-shadow: 0 10px 22px rgba(31,42,68,.06);
+          cursor: pointer;
+        }
+        .btn-ghost:disabled { opacity: .6; cursor: not-allowed; }
       `}</style>
     </div>
   );

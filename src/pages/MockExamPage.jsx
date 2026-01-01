@@ -13,18 +13,110 @@ import { supabase } from '../utils/supabaseClient';
 import { getSession } from '../utils/session';
 import StudentShell from './StudentShell';
 
+const COLORS = {
+  bg: '#fff5f8',
+  card: '#ffffff',
+  text: '#1f2a44',
+  sub: '#5d6b82',
+  border: '#ffd3e3',
+  pink: '#ff6fa3',
+  pink2: '#ff8fb7',
+  pinkHover: '#ff3e8d',
+  pinkSoft: '#fff0f5',
+  ok: '#0a7a3d',
+  nok: '#b00020',
+};
+
 const styles = {
+  topCard: {
+    background: COLORS.card,
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 14,
+    padding: 16,
+    boxShadow: '0 10px 30px rgba(255,111,163,.10)',
+    color: COLORS.text,
+  },
+
   row: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 },
-  input: { width: '100%', padding: '12px 14px', border: '1px solid #ffd3e3', borderRadius: 10, outline: 'none', fontSize: 14 },
-  btn: { padding: '12px 16px', borderRadius: 10, border: 'none', color: '#fff', fontWeight: 700, cursor: 'pointer', background: '#ff8fb7' },
-  card: { border: '1px solid #ffd3e3', borderRadius: 12, padding: 20, marginTop: 12 },
-  term: { fontSize: 28, fontWeight: 900, color: '#333', textAlign: 'center' },
-  timer: { fontSize: 14, color: '#ff6fa3', textAlign: 'center', marginTop: 6 },
-  resultBox: { marginTop: 16, borderTop: '1px dashed #ffd3e3', paddingTop: 12 },
-  item: { padding: '10px 12px', borderRadius: 10, border: '1px solid #ffd3e3', background: '#fff', marginTop: 10 },
-  ok: { color: '#0a7a3d', fontWeight: 700 },
-  nok: { color: '#b00020', fontWeight: 700 },
-  warn: { background: '#fff0f5', border: '1px solid #ffd3e3', padding: '10px 12px', borderRadius: 10, marginTop: 12, color: '#b00020' },
+
+  label: { fontSize: 13, color: COLORS.text, fontWeight: 900, marginBottom: 6 },
+
+  input: {
+    width: '100%',
+    padding: '12px 14px',
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 12,
+    outline: 'none',
+    fontSize: 14,
+    color: COLORS.text,
+    background: '#fff',
+    fontWeight: 800,
+    boxShadow: '0 8px 18px rgba(31,42,68,0.06)',
+  },
+
+  // ✅ 전역 button 영향 방지 위해 버튼 스타일 확정
+  primaryBtn: {
+    padding: '12px 16px',
+    borderRadius: 12,
+    border: 'none',
+    color: '#fff',
+    fontWeight: 900,
+    cursor: 'pointer',
+    background: COLORS.pink2,
+    boxShadow: '0 10px 20px rgba(255,111,163,.18)',
+  },
+  ghostBtn: {
+    padding: '12px 16px',
+    borderRadius: 12,
+    border: `1px solid ${COLORS.border}`,
+    color: COLORS.text,
+    fontWeight: 900,
+    cursor: 'pointer',
+    background: '#fff',
+    boxShadow: '0 10px 20px rgba(31,42,68,0.06)',
+  },
+
+  card: {
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 14,
+    padding: 18,
+    marginTop: 12,
+    background: COLORS.card,
+    color: COLORS.text,
+  },
+
+  term: { fontSize: 28, fontWeight: 900, color: COLORS.text, textAlign: 'center', marginTop: 10 },
+  timer: { fontSize: 14, color: COLORS.pink, textAlign: 'center', marginTop: 6, fontWeight: 900 },
+
+  resultBox: { marginTop: 16, borderTop: `1px dashed ${COLORS.border}`, paddingTop: 12 },
+
+  item: {
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: `1px solid ${COLORS.border}`,
+    background: '#fff',
+    marginTop: 10,
+    color: COLORS.text,
+    boxShadow: '0 8px 18px rgba(31,42,68,0.05)',
+  },
+
+  ok: { color: COLORS.ok, fontWeight: 900 },
+  nok: { color: COLORS.nok, fontWeight: 900 },
+
+  warn: {
+    background: COLORS.pinkSoft,
+    border: `1px solid ${COLORS.border}`,
+    padding: '10px 12px',
+    borderRadius: 12,
+    marginTop: 12,
+    color: COLORS.nok,
+    fontWeight: 800,
+  },
+
+  topInfo: { color: COLORS.text, marginBottom: 6, fontSize: 13, fontWeight: 800 },
+  topSub: { fontSize: 12, color: COLORS.sub, marginTop: 2, fontWeight: 700 },
+
+  metaLine: { display: 'flex', justifyContent: 'space-between', gap: 10, color: COLORS.text, fontWeight: 900 },
 };
 
 function useQuery() {
@@ -57,7 +149,7 @@ function normalizeInput({ locState, query }) {
   const qEnd = query.get('end');
 
   const legacy = {
-    book: (locState?.book) || qBook || '',
+    book: locState?.book || qBook || '',
     chapters: (() => {
       const st = ensureArray(locState?.chapters);
       if (st?.length) return st;
@@ -96,16 +188,18 @@ function normalizeInput({ locState, query }) {
   if (!legacy.book) return { mode: 'none', selections: [], legacy, wrong_book_ids: [] };
   return {
     mode: 'single',
-    selections: [{
-      book: legacy.book,
-      chaptersText: legacy._rawChaptersParam || '',
-      chapters: legacy.chapters,
-      start: legacy.start,
-      end: legacy.end,
-      raw: null
-    }],
+    selections: [
+      {
+        book: legacy.book,
+        chaptersText: legacy._rawChaptersParam || '',
+        chapters: legacy.chapters,
+        start: legacy.start,
+        end: legacy.end,
+        raw: null,
+      },
+    ],
     legacy,
-    wrong_book_ids: []
+    wrong_book_ids: [],
   };
 }
 
@@ -141,7 +235,7 @@ async function fetchWrongWords(wrongBookIds) {
 
   const rows = items || [];
 
-  const hasFull = rows.some(r => (r?.term_en && r?.meaning_ko));
+  const hasFull = rows.some((r) => r?.term_en && r?.meaning_ko);
   if (hasFull) {
     return rows
       .map((r) => ({
@@ -154,10 +248,10 @@ async function fetchWrongWords(wrongBookIds) {
         pos: r.pos ?? null,
         accepted_ko: r.accepted_ko ?? null,
       }))
-      .filter(w => w.term_en && w.meaning_ko);
+      .filter((w) => w.term_en && w.meaning_ko);
   }
 
-  const wordIds = Array.from(new Set(rows.map(r => r.word_id).filter(Boolean)));
+  const wordIds = Array.from(new Set(rows.map((r) => r.word_id).filter(Boolean)));
   if (!wordIds.length) return [];
 
   const chunkSize = 200;
@@ -175,7 +269,7 @@ async function fetchWrongWords(wrongBookIds) {
     out.push(...(data || []));
   }
 
-  return out.map(w => ({ ...w, word_id: w.id }));
+  return out.map((w) => ({ ...w, word_id: w.id }));
 }
 
 export default function MockExamPage() {
@@ -183,6 +277,7 @@ export default function MockExamPage() {
   const loc = useLocation();
   const q = useQuery();
 
+  // eslint-disable-next-line no-unused-vars
   const me = getSession();
 
   const input = useMemo(() => {
@@ -273,14 +368,8 @@ export default function MockExamPage() {
           const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
           let range = [];
-
-          if (chapters.length > 0) {
-            range = await fetchWordsByChapters(book, chapters);
-          } else if (hasRange) {
-            range = await fetchWordsInRange(book, sel.start, sel.end);
-          } else {
-            range = [];
-          }
+          if (chapters.length > 0) range = await fetchWordsByChapters(book, chapters);
+          else if (hasRange) range = await fetchWordsInRange(book, sel.start, sel.end);
 
           const withBook = (range || []).map((w) => ({ ...w, book: w.book || book }));
           chunks.push(...withBook);
@@ -295,7 +384,9 @@ export default function MockExamPage() {
       }
     })();
 
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [mode, selections, legacy._rawChaptersParam, wrongBookIds]);
 
   // 시험 시작
@@ -399,9 +490,11 @@ export default function MockExamPage() {
   if (mode === 'none') {
     return (
       <StudentShell>
-        <div className="vh-100 centered with-safe" style={{ width:'100%' }}>
+        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
           <div className="student-container">
-            <div className="student-card">잘못된 접근입니다.</div>
+            <div className="student-card" style={{ ...styles.topCard, textAlign: 'center' }}>
+              잘못된 접근입니다.
+            </div>
           </div>
         </div>
       </StudentShell>
@@ -419,19 +512,15 @@ export default function MockExamPage() {
 
   return (
     <StudentShell>
-      <div className="vh-100 centered with-safe" style={{ width:'100%' }}>
+      <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
         <div className="student-container">
-          <div className="student-card">
+          <div className="student-card" style={styles.topCard}>
             {/* 상단 간략 정보 */}
-            <div style={{ color:'#444', marginBottom: 6, fontSize:13 }}>
-              <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+            <div style={styles.topInfo}>
+              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {headerText || (selections[0] ? selectionToText(selections[0], legacy._rawChaptersParam) : '')}
               </div>
-              {phase === 'exam' && currentMetaText && (
-                <div style={{ fontSize:12, color:'#777', marginTop:2 }}>
-                  현재: {currentMetaText}
-                </div>
-              )}
+              {phase === 'exam' && currentMetaText && <div style={styles.topSub}>현재: {currentMetaText}</div>}
             </div>
 
             {/* 설정 */}
@@ -439,7 +528,7 @@ export default function MockExamPage() {
               <>
                 <div className="grid" style={styles.row}>
                   <div>
-                    <div style={{ fontSize: 13, color: '#444' }}>문제 수</div>
+                    <div style={styles.label}>문제 수</div>
                     <input
                       style={styles.input}
                       value={numQ}
@@ -451,7 +540,7 @@ export default function MockExamPage() {
                     />
                   </div>
                   <div>
-                    <div style={{ fontSize: 13, color: '#444' }}>커트라인(-X컷에서 X)</div>
+                    <div style={styles.label}>커트라인(-X컷에서 X)</div>
                     <input
                       style={styles.input}
                       value={cutMiss}
@@ -465,7 +554,9 @@ export default function MockExamPage() {
                 </div>
 
                 <div style={{ marginTop: 12 }}>
-                  <button className="btn" style={styles.btn} onClick={startExam}>시작하기</button>
+                  <button type="button" style={styles.primaryBtn} onClick={startExam}>
+                    시작하기
+                  </button>
                 </div>
               </>
             )}
@@ -473,10 +564,11 @@ export default function MockExamPage() {
             {/* 시험 */}
             {phase === 'exam' && (
               <div style={styles.card}>
-                <div style={{ display:'flex', justifyContent:'space-between' }}>
+                <div style={styles.metaLine}>
                   <div>문항 {i + 1} / {seq.length}</div>
                   <div>맞춘 개수: {corrects}</div>
                 </div>
+
                 <div style={styles.term}>{seq[i]?.term_en}</div>
                 <div style={styles.timer}>남은 시간: {remaining}초</div>
 
@@ -489,7 +581,10 @@ export default function MockExamPage() {
                     value={answer}
                     onChange={(e) => setAnswer(e.target.value)}
                     onCompositionStart={() => setIsComposing(true)}
-                    onCompositionEnd={(e) => { setIsComposing(false); setAnswer(e.currentTarget.value); }}
+                    onCompositionEnd={(e) => {
+                      setIsComposing(false);
+                      setAnswer(e.currentTarget.value);
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         if (isComposing) return;
@@ -501,9 +596,19 @@ export default function MockExamPage() {
                   />
                 </div>
 
-                <div style={{ marginTop: 12 }}>
-                  <button style={styles.btn} onClick={() => submitCurrent(answerRef.current)}>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="button" style={styles.primaryBtn} onClick={() => submitCurrent(answerRef.current)}>
                     제출(Enter)
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.ghostBtn}
+                    onClick={() => {
+                      // 중간에 나가면 실수 방지용 안내
+                      if (confirm('시험을 중단하고 범위 선택으로 돌아갈까요?')) nav('/study');
+                    }}
+                  >
+                    중단
                   </button>
                 </div>
               </div>
@@ -512,40 +617,59 @@ export default function MockExamPage() {
             {/* 종료 & 리뷰 */}
             {phase === 'done' && (
               <div style={styles.card}>
-                <div><b>결과:</b> {passOrFail()} ✅</div>
-                <div>맞춘 개수: {corrects} / {seq.length} (오답: {(seq.length - corrects)}, 커트라인: -{cutMiss}컷)</div>
+                <div style={{ fontWeight: 900, color: COLORS.text }}>
+                  결과: {passOrFail()} ✅
+                </div>
+                <div style={{ marginTop: 6, fontWeight: 800, color: COLORS.text }}>
+                  맞춘 개수: {corrects} / {seq.length} (오답: {seq.length - corrects}, 커트라인: -{cutMiss}컷)
+                </div>
 
                 {!reviewOpen ? (
                   <>
-                    <div style={styles.warn} >
+                    <div style={styles.warn}>
                       <b>안내</b><br />
                       모의시험은 AI가 채점하기 때문에 오류가 있을 수 있습니다. 반드시 정답과 오답을 한번 더 숙지 후 공식시험을 응시해주세요.
                     </div>
                     <div style={{ marginTop: 12 }}>
-                      <button className="btn" style={styles.btn} onClick={() => setReviewOpen(true)}>확인</button>
+                      <button type="button" style={styles.primaryBtn} onClick={() => setReviewOpen(true)}>
+                        확인
+                      </button>
                     </div>
                   </>
                 ) : (
                   <div style={styles.resultBox}>
-                    <div><b>전체 문제 리뷰</b> (정답/내 답/정오)</div>
+                    <div style={{ fontWeight: 900, color: COLORS.text }}>
+                      전체 문제 리뷰 (정답/내 답/정오)
+                    </div>
+
                     {results.map((r, idx) => (
                       <div key={idx} style={styles.item}>
-                        <div>
-                          <b>{idx + 1}. {r.word.term_en}</b> — {r.ok ? <span style={styles.ok}>정답</span> : <span style={styles.nok}>오답</span>}
+                        <div style={{ color: COLORS.text, fontWeight: 900 }}>
+                          {idx + 1}. {r.word.term_en}{' '}
+                          — {r.ok ? <span style={styles.ok}>정답</span> : <span style={styles.nok}>오답</span>}
                           {r.word?.book && (
-                            <span style={{ marginLeft: 8, fontSize: 12, color:'#777' }}>
-                              ({r.word.book}{Number.isFinite(Number(r.word.chapter)) ? ` ${r.word.chapter}강` : ''})
+                            <span style={{ marginLeft: 8, fontSize: 12, color: COLORS.sub, fontWeight: 700 }}>
+                              ({r.word.book}
+                              {Number.isFinite(Number(r.word.chapter)) ? ` ${r.word.chapter}강` : ''})
                             </span>
                           )}
                         </div>
-                        <div>정답: {r.word.meaning_ko}</div>
-                        <div>내 답: {r.your || '(무응답)'}</div>
+                        <div style={{ marginTop: 4, fontWeight: 800, color: COLORS.text }}>
+                          정답: {r.word.meaning_ko}
+                        </div>
+                        <div style={{ fontWeight: 800, color: COLORS.text }}>
+                          내 답: {r.your || '(무응답)'}
+                        </div>
                       </div>
                     ))}
 
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-                      <button style={styles.btn} onClick={() => nav('/study')}>범위 다시 고르기</button>
-                      <button style={styles.btn} onClick={() => nav('/dashboard')}>대시보드로</button>
+                      <button type="button" style={styles.primaryBtn} onClick={() => nav('/study')}>
+                        범위 다시 고르기
+                      </button>
+                      <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>
+                        대시보드로
+                      </button>
                     </div>
                   </div>
                 )}

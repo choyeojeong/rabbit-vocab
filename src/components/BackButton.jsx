@@ -15,32 +15,40 @@ export default function BackButton({ fallback = "/dashboard", hide = false }) {
       onClick={goBack}
       style={{
         position: "fixed",
-
-        // ✅ iPhone safe-area(노치) 만큼 아래로 자동 보정
-        // - 지원 시: top = safe-area + 10px
-        // - 미지원 시: top = 10px
         top: "calc(env(safe-area-inset-top, 0px) + 10px)",
-
         left: 12,
         zIndex: 99998,
+
         height: 34,
         padding: "0 12px",
         borderRadius: 999,
-        border: "1px solid #e9e9e9",
-        background: "#fff",
 
-        // ✅ 핵심: 전역 color(흰색) 상속 방지
+        // ✅ 전역 button 스타일(특히 !important)과 충돌 대비: 값들을 최대한 고정
+        backgroundColor: "#fff",
+        border: "1px solid #e9e9e9",
+
+        // ✅ 전역 color 상속/강제 흰색 방지 (iOS 포함)
         color: "#222",
+        WebkitTextFillColor: "#222",
 
         fontWeight: 900,
         fontSize: 14,
         lineHeight: "34px",
+
         cursor: "pointer",
         boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
         display: "inline-flex",
         alignItems: "center",
         gap: 6,
-        WebkitTextFillColor: "#222", // ✅ iOS/일부 브라우저에서 color 무시 방지
+
+        // ✅ 모바일 UX 안정화
+        WebkitAppearance: "none",
+        appearance: "none",
+        outline: "none",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        touchAction: "manipulation",
+        WebkitTapHighlightColor: "transparent",
       }}
       aria-label="뒤로가기"
       title="뒤로가기"

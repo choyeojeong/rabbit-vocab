@@ -14,23 +14,161 @@ import { getSession } from '../utils/session';
 import { speakWord, speakCancel } from '../utils/speech';
 import StudentShell from './StudentShell';
 
+const COLORS = {
+  bg: '#fff5f8',
+  card: '#ffffff',
+  text: '#1f2a44',
+  sub: '#5d6b82',
+  border: '#ffd3e3',
+  pink: '#ff6fa3',
+  pinkHover: '#ff3e8d',
+  pinkSoft: '#fff0f5',
+  blue: '#2b59ff',
+  okBg: '#e7fff3',
+  okBd: '#b3f0d0',
+  badBg: '#ffe3ea',
+  badBd: '#ffb8c9',
+  danger: '#b00020',
+};
+
 const styles = {
-  card: { border: '1px solid #ffd3e3', borderRadius: 12, padding: 20 },
-  termRow: { display:'flex', alignItems:'center', justifyContent:'center', gap:12, marginBottom: 8 },
-  term: { fontSize: 28, fontWeight: 900, color: '#333', textAlign: 'center' },
-  btns: { display: 'grid', gridTemplateColumns: '1fr', gap: 10, marginTop: 16 },
-  opt: { padding: '12px 14px', borderRadius: 10, border: '1px solid #ffd3e3', background: '#fff', cursor: 'pointer', textAlign: 'left', color: '#000' },
-  correct: { background: '#e7fff3', borderColor: '#b3f0d0' },
-  wrong: { background: '#ffe3ea', borderColor: '#ffb8c9' },
-  footer: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 },
-  next: { padding: '10px 14px', background: '#ff8fb7', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' },
-  info: { fontSize: 13, color: '#777' },
-  wrongItem: { padding: '10px 12px', borderRadius: 10, border: '1px solid #ffd3e3', background: '#fff', marginTop: 10 },
-  tagWrong: { display: 'inline-block', padding: '2px 8px', borderRadius: 999, background: '#ffe3ea', color: '#b00020', fontSize: 12, marginLeft: 6 },
+  // 상단/본문 카드 공통
+  wrap: { width: '100%', color: COLORS.text },
+  topCard: {
+    background: COLORS.card,
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 14,
+    padding: 16,
+    boxShadow: '0 10px 30px rgba(255,111,163,.10)',
+    color: COLORS.text,
+  },
+
+  // 문제 카드
+  card: {
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 14,
+    padding: 18,
+    background: COLORS.card,
+    color: COLORS.text,
+  },
+
+  termRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  term: {
+    fontSize: 28,
+    fontWeight: 900,
+    color: COLORS.text,
+    textAlign: 'center',
+    letterSpacing: -0.2,
+  },
+
+  btns: { display: 'grid', gridTemplateColumns: '1fr', gap: 10, marginTop: 14 },
+
+  // ✅ 보기 버튼: 전역 button 스타일(핑크/흰글씨) 영향 차단용으로 색/배경/보더 확실히
+  optBtn: {
+    width: '100%',
+    padding: '12px 14px',
+    borderRadius: 12,
+    border: `1px solid ${COLORS.border}`,
+    background: '#fff',
+    cursor: 'pointer',
+    textAlign: 'left',
+    color: COLORS.text,
+    fontWeight: 800,
+    boxShadow: '0 8px 18px rgba(31,42,68,0.06)',
+  },
+  correct: { background: COLORS.okBg, borderColor: COLORS.okBd },
+  wrong: { background: COLORS.badBg, borderColor: COLORS.badBd },
+
+  footer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 14,
+  },
+  info: { fontSize: 13, color: COLORS.sub, fontWeight: 700 },
+
+  // ✅ 액션 버튼(다음/이동)도 전역 스타일 영향 최소화 위해 확실히 고정
+  primaryBtn: {
+    padding: '10px 14px',
+    background: COLORS.pink,
+    color: '#fff',
+    border: 'none',
+    borderRadius: 12,
+    fontWeight: 900,
+    cursor: 'pointer',
+    boxShadow: '0 10px 20px rgba(255,111,163,.20)',
+  },
+  primaryDisabled: { opacity: 0.6, cursor: 'not-allowed' },
+
+  ghostBtn: {
+    padding: '10px 14px',
+    background: '#fff',
+    color: COLORS.text,
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 12,
+    fontWeight: 900,
+    cursor: 'pointer',
+    boxShadow: '0 10px 20px rgba(31,42,68,0.06)',
+  },
+
+  wrongItem: {
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: `1px solid ${COLORS.border}`,
+    background: '#fff',
+    marginTop: 10,
+    color: COLORS.text,
+  },
+  tagWrong: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: 999,
+    background: COLORS.badBg,
+    color: COLORS.danger,
+    fontSize: 12,
+    marginLeft: 6,
+    fontWeight: 900,
+    border: `1px solid ${COLORS.badBd}`,
+  },
   btnRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 },
-  speakerBtn: { border: '1px solid #ffd0e1', background: '#fff5f8', borderRadius: 12, padding: '8px 10px', cursor: 'pointer' },
-  unlockBar: { background:'#fff0f5', border:'1px dashed #ff9fc0', padding:'10px 12px', borderRadius:12, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:12 },
-  unlockBtn: { padding:'8px 12px', borderRadius:10, border:'1px solid #ff9fc0', background:'#ffeff6', fontWeight:700, cursor:'pointer' },
+
+  speakerBtn: {
+    border: `1px solid ${COLORS.border}`,
+    background: COLORS.pinkSoft,
+    borderRadius: 12,
+    padding: '8px 10px',
+    cursor: 'pointer',
+    boxShadow: '0 8px 18px rgba(255,111,163,.10)',
+  },
+
+  unlockBar: {
+    background: COLORS.pinkSoft,
+    border: '1px dashed #ff9fc0',
+    padding: '10px 12px',
+    borderRadius: 12,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 12,
+    color: COLORS.text,
+  },
+  unlockBtn: {
+    padding: '8px 12px',
+    borderRadius: 10,
+    border: '1px solid #ff9fc0',
+    background: '#ffeff6',
+    fontWeight: 900,
+    cursor: 'pointer',
+    color: COLORS.text,
+  },
 };
 
 function useQuery() {
@@ -44,7 +182,7 @@ function SpeakerIcon({ size = 18 }) {
       <path
         d="M3 10v4h4l5 4V6L7 10H3zm13.5 2a4.5 4.5 0 0 0-3-4.243v8.486A4.5 4.5 0 0 0 16.5 12zm0-7a9.5 9.5 0 0 1 0 14m-3-12a7 7 0 0 1 0 10"
         fill="none"
-        stroke="#ff6fa3"
+        stroke={COLORS.pink}
         strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -78,7 +216,7 @@ function normalizeInput({ locState, query }) {
   const qEnd = query.get('end');
 
   const legacy = {
-    book: (locState?.book) || qBook || '',
+    book: locState?.book || qBook || '',
     chapters: (() => {
       const st = ensureArray(locState?.chapters);
       if (st?.length) return st;
@@ -106,14 +244,7 @@ function normalizeInput({ locState, query }) {
         const start = Number(s?.start);
         const end = Number(s?.end);
 
-        return {
-          book,
-          chaptersText,
-          chapters,
-          start,
-          end,
-          raw: s,
-        };
+        return { book, chaptersText, chapters, start, end, raw: s };
       })
       .filter(Boolean);
 
@@ -124,23 +255,27 @@ function normalizeInput({ locState, query }) {
   if (!legacy.book) return { mode: 'none', selections: [], legacy, wrong_book_ids: [] };
   return {
     mode: 'single',
-    selections: [{
-      book: legacy.book,
-      chaptersText: legacy._rawChaptersParam || '',
-      chapters: legacy.chapters,
-      start: legacy.start,
-      end: legacy.end,
-      raw: null
-    }],
+    selections: [
+      {
+        book: legacy.book,
+        chaptersText: legacy._rawChaptersParam || '',
+        chapters: legacy.chapters,
+        start: legacy.start,
+        end: legacy.end,
+        raw: null,
+      },
+    ],
     legacy,
-    wrong_book_ids: []
+    wrong_book_ids: [],
   };
 }
 
 // 표시용: 각 selection 요약 텍스트
 function selectionToText(sel, legacyRawChaptersParam = '') {
   const book = sel.book;
-  const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
+  const chapters = ensureArray(sel.chapters)
+    .filter((n) => Number.isFinite(Number(n)))
+    .map(Number);
   const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
   if (chapters.length) return `${book} (${sel.chaptersText || chapters.join(', ')})`;
@@ -172,7 +307,7 @@ async function fetchWrongWords(wrongBookIds) {
   const rows = items || [];
 
   // 이미 term_en/meaning_ko가 들어있으면 그걸로 사용
-  const hasFull = rows.some(r => (r?.term_en && r?.meaning_ko));
+  const hasFull = rows.some((r) => r?.term_en && r?.meaning_ko);
   if (hasFull) {
     return rows
       .map((r) => ({
@@ -185,11 +320,11 @@ async function fetchWrongWords(wrongBookIds) {
         pos: r.pos ?? null,
         accepted_ko: r.accepted_ko ?? null,
       }))
-      .filter(w => w.term_en && w.meaning_ko);
+      .filter((w) => w.term_en && w.meaning_ko);
   }
 
   // 2) 폴백: word_id만 있다면 vocab_words에서 가져온다
-  const wordIds = Array.from(new Set(rows.map(r => r.word_id).filter(Boolean)));
+  const wordIds = Array.from(new Set(rows.map((r) => r.word_id).filter(Boolean)));
   if (!wordIds.length) return [];
 
   // IN이 너무 길어질 수 있으니 chunk
@@ -207,7 +342,7 @@ async function fetchWrongWords(wrongBookIds) {
     }
     out.push(...(data || []));
   }
-  return out.map(w => ({ ...w, word_id: w.id }));
+  return out.map((w) => ({ ...w, word_id: w.id }));
 }
 
 export default function PracticeMCQ() {
@@ -215,6 +350,7 @@ export default function PracticeMCQ() {
   const loc = useLocation();
   const q = useQuery();
 
+  // eslint-disable-next-line no-unused-vars
   const me = getSession();
 
   const input = useMemo(() => {
@@ -228,7 +364,7 @@ export default function PracticeMCQ() {
   const wrongBookIds = input.wrong_book_ids || [];
 
   const [phase, setPhase] = useState('play'); // 'play' | 'done'
-  const [words, setWords] = useState([]);     // 문제로 낼 단어들(합쳐진 배열)
+  const [words, setWords] = useState([]); // 문제로 낼 단어들(합쳐진 배열)
   const [i, setI] = useState(0);
   const [opts, setOpts] = useState([]);
   const [ansIdx, setAnsIdx] = useState(-1);
@@ -320,7 +456,9 @@ export default function PracticeMCQ() {
         const chunks = [];
         for (const sel of selections) {
           const book = sel.book;
-          const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
+          const chapters = ensureArray(sel.chapters)
+            .filter((n) => Number.isFinite(Number(n)))
+            .map(Number);
           const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
           let range = [];
@@ -351,9 +489,7 @@ export default function PracticeMCQ() {
         for (const b of uniqueBooks) {
           try {
             const pool = await fetchWordsInBook(b);
-            poolMap[b] = (pool && pool.length)
-              ? pool.map((w) => ({ ...w, book: w.book || b }))
-              : [];
+            poolMap[b] = pool && pool.length ? pool.map((w) => ({ ...w, book: w.book || b })) : [];
           } catch (e) {
             console.warn('MCQ: book pool load failed for', b, e);
             poolMap[b] = [];
@@ -362,7 +498,7 @@ export default function PracticeMCQ() {
 
         // 풀 비었으면(로드 실패) 해당 book의 문제 range에서라도 풀백
         const byBookFromChunks = {};
-        for (const w of (chunks || [])) {
+        for (const w of chunks || []) {
           const b = w.book || '';
           if (!b) continue;
           if (!byBookFromChunks[b]) byBookFromChunks[b] = [];
@@ -387,7 +523,9 @@ export default function PracticeMCQ() {
       }
     })();
 
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [mode, selections, legacy._rawChaptersParam, wrongBookIds]);
 
   // 보기 생성
@@ -406,7 +544,7 @@ export default function PracticeMCQ() {
 
     // 정규 모드: 현재 문제의 book 풀로 보기 만들기
     const b = current?.book;
-    const pool = (b && bookPools[b] && bookPools[b].length) ? bookPools[b] : [];
+    const pool = b && bookPools[b] && bookPools[b].length ? bookPools[b] : [];
     const effectivePool = pool.length ? pool : words;
     if (!effectivePool || effectivePool.length === 0) return;
 
@@ -454,8 +592,12 @@ export default function PracticeMCQ() {
   // 🔊 오디오 잠금 해제
   async function enableSoundOnce() {
     try {
-      try { window.speechSynthesis?.resume?.(); } catch {}
-      try { window.speechSynthesis?.cancel?.(); } catch {}
+      try {
+        window.speechSynthesis?.resume?.();
+      } catch {}
+      try {
+        window.speechSynthesis?.cancel?.();
+      } catch {}
       try {
         const Ctx = window.AudioContext || window.webkitAudioContext;
         if (Ctx) {
@@ -481,9 +623,11 @@ export default function PracticeMCQ() {
   if (mode === 'none') {
     return (
       <StudentShell>
-        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+        <div className="vh-100 centered with-safe" style={styles.wrap}>
           <div className="student-container">
-            <div className="student-card">잘못된 접근입니다.</div>
+            <div className="student-card" style={{ ...styles.topCard, textAlign: 'center' }}>
+              잘못된 접근입니다.
+            </div>
           </div>
         </div>
       </StudentShell>
@@ -494,9 +638,11 @@ export default function PracticeMCQ() {
   if (loading) {
     return (
       <StudentShell>
-        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+        <div className="vh-100 centered with-safe" style={styles.wrap}>
           <div className="student-container">
-            <div className="student-card">불러오는 중…</div>
+            <div className="student-card" style={{ ...styles.topCard, textAlign: 'center' }}>
+              불러오는 중…
+            </div>
           </div>
         </div>
       </StudentShell>
@@ -507,12 +653,10 @@ export default function PracticeMCQ() {
   if (!words.length) {
     return (
       <StudentShell>
-        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+        <div className="vh-100 centered with-safe" style={styles.wrap}>
           <div className="student-container">
-            <div className="student-card">
-              {mode === 'wrong'
-                ? '선택한 오답 파일에 단어가 없어요.'
-                : '선택한 범위에 단어가 없어요.'}
+            <div className="student-card" style={{ ...styles.topCard, textAlign: 'center' }}>
+              {mode === 'wrong' ? '선택한 오답 파일에 단어가 없어요.' : '선택한 범위에 단어가 없어요.'}
             </div>
           </div>
         </div>
@@ -522,12 +666,12 @@ export default function PracticeMCQ() {
 
   return (
     <StudentShell>
-      <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
+      <div className="vh-100 centered with-safe" style={styles.wrap}>
         <div className="student-container">
           {/* 🔊 소리 켜기(한번) 안내 바 */}
           {!soundEnabled && (
             <div className="student-card" style={styles.unlockBar} role="region" aria-label="소리 사용 안내">
-              <div style={{fontSize:13, color:'#444'}}>
+              <div style={{ fontSize: 13, color: COLORS.text }}>
                 모바일에서는 자동재생이 차단될 수 있어요. <b>소리 켜기</b>를 한 번 눌러주세요.
               </div>
               <button type="button" onClick={enableSoundOnce} style={styles.unlockBtn}>
@@ -536,27 +680,27 @@ export default function PracticeMCQ() {
             </div>
           )}
 
-          <div className="student-card" style={{ marginTop: 12 }}>
+          <div className="student-card" style={{ ...styles.topCard, marginTop: 12 }}>
             {/* 진행 정보 */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', color:'#444', fontSize:13, gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
+                <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 900 }}>
                   {headerText || (selections[0] ? selectionToText(selections[0], legacy._rawChaptersParam) : '')}
                 </div>
                 {currentMetaText && (
-                  <div style={{ fontSize:12, color:'#777', marginTop:2 }}>
+                  <div style={{ fontSize: 12, color: COLORS.sub, marginTop: 2, fontWeight: 700 }}>
                     현재: {currentMetaText}
                   </div>
                 )}
               </div>
-              <div style={{ whiteSpace:'nowrap' }}>
+              <div style={{ whiteSpace: 'nowrap', fontWeight: 900, color: COLORS.text }}>
                 {phase === 'play' ? `${i + 1}/${words.length}` : `${words.length}문제 완료`} | 점수 {score}
               </div>
             </div>
 
             {/* 문제 카드 */}
             {phase === 'play' && (
-              <div style={styles.card}>
+              <div style={{ ...styles.card, marginTop: 14 }}>
                 {/* 영어 단어 + 스피커 버튼 */}
                 <div style={styles.termRow}>
                   <div style={styles.term}>{current?.term_en}</div>
@@ -576,13 +720,15 @@ export default function PracticeMCQ() {
                   {opts.map((op, idx) => {
                     const picked = chosen === idx;
                     const isCorrect = idx === ansIdx;
-                    let st = styles.opt;
+
+                    let st = { ...styles.optBtn };
                     if (chosen >= 0) {
                       if (isCorrect) st = { ...st, ...styles.correct };
                       else if (picked && !isCorrect) st = { ...st, ...styles.wrong };
                     }
+
                     return (
-                      <button key={idx} onClick={() => choose(idx)} style={st}>
+                      <button key={idx} type="button" onClick={() => choose(idx)} style={st}>
                         {idx + 1}. {op}
                       </button>
                     );
@@ -591,46 +737,60 @@ export default function PracticeMCQ() {
 
                 <div style={styles.footer}>
                   <div style={styles.info}>
-                    {chosen >= 0
-                      ? (chosen === ansIdx ? '정답!' : `오답 😿  정답: ${opts[ansIdx]}`)
-                      : '보기 중 하나를 선택하세요.'}
+                    {chosen >= 0 ? (chosen === ansIdx ? '정답! 🐰' : `오답 😿  정답: ${opts[ansIdx]}`) : '보기 중 하나를 선택하세요.'}
                   </div>
-                  <button style={styles.next} onClick={next} disabled={chosen < 0}>다음</button>
+                  <button
+                    type="button"
+                    style={{ ...styles.primaryBtn, ...(chosen < 0 ? styles.primaryDisabled : null) }}
+                    onClick={next}
+                    disabled={chosen < 0}
+                  >
+                    다음
+                  </button>
                 </div>
               </div>
             )}
 
             {/* 종료 카드 */}
             {phase === 'done' && (
-              <div style={styles.card}>
-                <div><b>연습 종료!</b> 점수: {score} / {words.length}</div>
+              <div style={{ ...styles.card, marginTop: 14 }}>
+                <div style={{ fontWeight: 900, color: COLORS.text }}>
+                  연습 종료! 점수: {score} / {words.length}
+                </div>
 
                 {wrongs.length > 0 ? (
                   <>
-                    <div style={{ marginTop: 12, fontWeight: 700 }}>오답 목록 (정답 포함)</div>
+                    <div style={{ marginTop: 12, fontWeight: 900, color: COLORS.text }}>오답 목록 (정답 포함)</div>
                     {wrongs.map((w, idx) => (
                       <div key={idx} style={styles.wrongItem}>
-                        <div>
-                          <b>{idx + 1}. {w.word.term_en}</b>
+                        <div style={{ color: COLORS.text }}>
+                          <b>
+                            {idx + 1}. {w.word.term_en}
+                          </b>
                           <span style={styles.tagWrong}>오답</span>
                           {w.word?.book && (
-                            <span style={{ marginLeft: 8, fontSize: 12, color:'#777' }}>
-                              ({w.word.book}{Number.isFinite(Number(w.word.chapter)) ? ` ${w.word.chapter}강` : ''})
+                            <span style={{ marginLeft: 8, fontSize: 12, color: COLORS.sub, fontWeight: 700 }}>
+                              ({w.word.book}
+                              {Number.isFinite(Number(w.word.chapter)) ? ` ${w.word.chapter}강` : ''})
                             </span>
                           )}
                         </div>
-                        <div>정답: {w.correct}</div>
-                        <div>내 답: {w.your || '(무응답)'}</div>
+                        <div style={{ marginTop: 4, color: COLORS.text, fontWeight: 700 }}>정답: {w.correct}</div>
+                        <div style={{ color: COLORS.text, fontWeight: 700 }}>내 답: {w.your || '(무응답)'}</div>
                       </div>
                     ))}
                   </>
                 ) : (
-                  <div style={{ marginTop: 12 }}>오답이 없어요. 훌륭해요! 🐰</div>
+                  <div style={{ marginTop: 12, color: COLORS.text, fontWeight: 900 }}>오답이 없어요. 훌륭해요! 🐰</div>
                 )}
 
                 <div style={styles.btnRow}>
-                  <button style={styles.next} onClick={() => nav('/study')}>범위 선택으로</button>
-                  <button style={styles.next} onClick={() => nav('/dashboard')}>대시보드</button>
+                  <button type="button" style={styles.primaryBtn} onClick={() => nav('/study')}>
+                    범위 선택으로
+                  </button>
+                  <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>
+                    대시보드
+                  </button>
                 </div>
               </div>
             )}

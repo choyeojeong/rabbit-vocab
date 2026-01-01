@@ -1,28 +1,53 @@
 /* src/index.css */
 
-/* 글로벌 기본값 */
+/* =========================================
+   Rabbit Global Theme (Light / Pink)
+   - 목표: 전역 대비(글자색) 안전하게 고정
+   - button 전역 스타일로 인한 흰글씨 문제 방지
+   ========================================= */
+
 :root {
   font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  /* Rabbit 테마: 연핑크 배경 */
-  color: #222;
-  background-color: #fff5f8;
+  /* ✅ 테마 토큰 */
+  --bg: #fff5f8;
+  --card: #ffffff;
+  --text: #1f2a44;
+  --sub: #5d6b82;
 
+  --pink: #ff6fa3;
+  --pink-hover: #ff3e8d;
+  --pink-soft: #fff0f5;
+  --pink-border: #ffd3e3;
+
+  --border: #e9eef5;
+  --link: #2b59ff;
+
+  --danger: #b00020;
+  --danger-soft: #fff1f2;
+
+  color-scheme: light;
+
+  /* 기존 */
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  /* ✅ 전역 기본 글자/배경 확정 */
+  color: var(--text);
+  background-color: var(--bg);
 }
 
-a {
-  font-weight: 500;
-  color: #ff6fa3;   /* 포인트 컬러 */
-  text-decoration: none;
+* {
+  box-sizing: border-box;
 }
-a:hover {
-  color: #ff3e8d;
+
+html,
+body {
+  height: 100%;
 }
 
 body {
@@ -30,39 +55,179 @@ body {
   min-width: 320px;
   min-height: 100vh;
 
-  background: #fff5f8;     /* 전역 배경 */
-  display: flex;
-  flex-direction: column;
+  /* ✅ 전역 배경 + 글자색 확정 (상속 꼬임 방지) */
+  background: var(--bg);
+  color: var(--text);
+
+  /* ❗️기존 flex는 레이아웃 부작용이 종종 있어서 제거 추천
+     (만약 기존 페이지가 body flex에 의존 중이면 아래 3줄 다시 켜도 됨)
+  */
+  display: block;
 }
 
-h1, h2, h3 {
+/* 헤딩 */
+h1,
+h2,
+h3 {
   margin: 0;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.2;
+  color: var(--text);
 }
+
+/* 링크 */
+a {
+  font-weight: 700;
+  color: var(--pink);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--pink-hover);
+}
+a:focus,
+a:focus-visible {
+  outline: 3px solid var(--pink-border);
+  border-radius: 8px;
+}
+
+/* 입력류 기본 대비 */
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--pink-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  outline: none;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #8a93a3;
+  font-weight: 600;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 3px solid var(--pink-border);
+}
+
+/* =========================================
+   Buttons
+   - 기본은 핑크(기존 유지)
+   - 하지만 페이지별로 탈출할 수 있도록 variant 클래스 제공
+   ========================================= */
 
 button {
-  border-radius: 8px;
+  border-radius: 10px;
   border: none;
-  padding: 0.6em 1.2em;
+  padding: 0.6em 1.1em;
   font-size: 1em;
-  font-weight: 600;
+  font-weight: 800;
   font-family: inherit;
-  background-color: #ff6fa3;
+
+  background-color: var(--pink);
   color: #fff;
+
   cursor: pointer;
-  box-shadow: 0 6px 18px rgba(255, 111, 163, 0.25);
-  transition: background 0.25s, transform 0.1s;
+  box-shadow: 0 10px 22px rgba(255, 111, 163, 0.18);
+  transition: background 0.2s, transform 0.08s, opacity 0.2s;
 }
+
 button:hover {
-  background-color: #ff3e8d;
+  background-color: var(--pink-hover);
 }
+
 button:active {
   transform: translateY(1px);
 }
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
 button:focus,
 button:focus-visible {
-  outline: 3px solid #ffd3e3;
+  outline: 3px solid var(--pink-border);
+}
+
+/* ✅ 버튼 변형 (페이지별로 "흰배경+검정글씨" 안전하게 만들기) */
+button.ghost {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid var(--pink-border);
+  box-shadow: 0 10px 22px rgba(31, 42, 68, 0.06);
+}
+
+button.ghost:hover {
+  background: var(--pink-soft);
+}
+
+button.secondary {
+  background: #f3f6fb;
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 22px rgba(31, 42, 68, 0.06);
+}
+
+button.secondary:hover {
+  background: #eaf0fb;
+}
+
+button.danger {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(176, 0, 32, 0.18);
+}
+
+button.danger:hover {
+  background: #8f001a;
+}
+
+/* ✅ 작은 버튼 */
+button.sm {
+  padding: 0.45em 0.85em;
+  font-size: 0.92em;
+  border-radius: 9px;
+}
+
+/* =========================================
+   Useful global utility classes (optional)
+   ========================================= */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(31, 42, 68, 0.08);
+  color: var(--text);
+}
+
+.muted {
+  color: var(--sub);
+  font-weight: 700;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font-weight: 900;
+  font-size: 12px;
+}
+
+.badge-pink {
+  border: 1px solid var(--pink-border);
+  background: var(--pink-soft);
+  color: #c94a7a;
 }
 
 /* 다크모드는 사용하지 않음 (테마 고정) */

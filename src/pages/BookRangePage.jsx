@@ -6,6 +6,87 @@ import { supabase } from "../utils/supabaseClient";
 import StudentShell from "./StudentShell";
 import { getSession } from "../utils/session";
 
+const COLORS = {
+  bg: "#fff5f8",
+  card: "#ffffff",
+  text: "#1f2a44",
+  sub: "#5d6b82",
+  border: "#ffd3e3",
+  border2: "#ffe1ec",
+  pink: "#ff6fa3",
+  pink2: "#ff8fb7",
+  pinkSoft: "#fff0f5",
+  danger: "#b00020",
+};
+
+const pageCard = {
+  background: COLORS.card,
+  border: `1px solid ${COLORS.border}`,
+  borderRadius: 14,
+  padding: 16,
+  color: COLORS.text,
+  boxShadow: "0 10px 30px rgba(255,111,163,.10)",
+};
+
+const tabBtn = {
+  flex: 1,
+  padding: "10px 12px",
+  borderRadius: 12,
+  fontWeight: 900,
+  cursor: "pointer",
+  background: "#fff",
+  color: COLORS.pink,
+  border: `1px solid ${COLORS.border}`,
+};
+
+const fieldStyle = {
+  width: "100%",
+  padding: "10px 12px",
+  border: `1px solid ${COLORS.border}`,
+  borderRadius: 12,
+  fontSize: 14,
+  outline: "none",
+  color: COLORS.text,
+  background: "#fff",
+  fontWeight: 800,
+  boxShadow: "0 8px 18px rgba(31,42,68,0.06)",
+};
+
+const miniBtn = {
+  padding: "8px 10px",
+  borderRadius: 10,
+  border: `1px solid ${COLORS.border}`,
+  background: "#fff",
+  color: COLORS.text,
+  fontWeight: 900,
+  cursor: "pointer",
+  boxShadow: "0 8px 18px rgba(31,42,68,0.06)",
+};
+
+const primaryBtn = {
+  width: "100%",
+  padding: "14px 16px",
+  borderRadius: 14,
+  border: "none",
+  background: COLORS.pink,
+  color: "#fff",
+  fontWeight: 900,
+  cursor: "pointer",
+  boxShadow: "0 12px 24px rgba(255,111,163,.18)",
+};
+
+const outlinePinkBtn = {
+  width: "100%",
+  padding: "14px 16px",
+  borderRadius: 14,
+  background: "#fff",
+  color: COLORS.pink,
+  border: `2px solid ${COLORS.pink2}`,
+  fontWeight: 900,
+  cursor: "pointer",
+  boxShadow: "0 12px 24px rgba(31,42,68,0.08)",
+};
+
 export default function BookRangePage({ mode = "practice" }) {
   const nav = useNavigate();
   const isOfficial = mode === "official";
@@ -144,7 +225,7 @@ export default function BookRangePage({ mode = "practice" }) {
     setSelectedWrongBookIds(new Set());
   }
 
-  // ✅ 오답 시험보기: PracticeMCQ/MockExamPage가 wrong_book_ids를 로드
+  // ✅ 오답 시험보기
   function goWrong(path) {
     const ids = Array.from(selectedWrongBookIds);
     if (!ids.length) {
@@ -365,10 +446,10 @@ export default function BookRangePage({ mode = "practice" }) {
                 onClick={() => onPickCategory(n.id)}
                 style={{
                   padding: "8px 10px",
-                  borderRadius: 10,
-                  border: "1px solid #ffd3e3",
-                  background: on ? "#ff6fa3" : "#fff",
-                  color: on ? "#fff" : "#1f2a44",
+                  borderRadius: 12,
+                  border: `1px solid ${COLORS.border}`,
+                  background: on ? COLORS.pink : "#fff",
+                  color: on ? "#fff" : COLORS.text,
                   cursor: "pointer",
                   fontWeight: 900,
                 }}
@@ -387,7 +468,7 @@ export default function BookRangePage({ mode = "practice" }) {
   return (
     <StudentShell>
       <div className="student-container">
-        <div className="student-card stack">
+        <div className="student-card stack" style={pageCard}>
           {/* 탭 버튼 */}
           <div style={{ display: "flex", gap: 10 }}>
             <button
@@ -395,9 +476,9 @@ export default function BookRangePage({ mode = "practice" }) {
               onClick={() => setTab("regular")}
               style={{
                 ...tabBtn,
-                background: tab === "regular" ? "#ff6fa3" : "#fff",
-                color: tab === "regular" ? "#fff" : "#ff6fa3",
-                border: tab === "regular" ? "1px solid #ff6fa3" : "1px solid #ffd3e3",
+                background: tab === "regular" ? COLORS.pink : "#fff",
+                color: tab === "regular" ? "#fff" : COLORS.pink,
+                border: tab === "regular" ? `1px solid ${COLORS.pink}` : `1px solid ${COLORS.border}`,
               }}
             >
               정규
@@ -407,9 +488,9 @@ export default function BookRangePage({ mode = "practice" }) {
               onClick={() => setTab("wrong")}
               style={{
                 ...tabBtn,
-                background: tab === "wrong" ? "#ff6fa3" : "#fff",
-                color: tab === "wrong" ? "#fff" : "#ff6fa3",
-                border: tab === "wrong" ? "1px solid #ff6fa3" : "1px solid #ffd3e3",
+                background: tab === "wrong" ? COLORS.pink : "#fff",
+                color: tab === "wrong" ? "#fff" : COLORS.pink,
+                border: tab === "wrong" ? `1px solid ${COLORS.pink}` : `1px solid ${COLORS.border}`,
               }}
             >
               오답
@@ -417,29 +498,30 @@ export default function BookRangePage({ mode = "practice" }) {
           </div>
 
           {/* =========================
-              오답 탭 UI (신규)
+              오답 탭 UI
           ========================= */}
           {tab === "wrong" ? (
             <>
-              <div style={{ marginTop: 12, fontWeight: 900 }}>
+              <div style={{ marginTop: 12, fontWeight: 900, color: COLORS.text }}>
                 {me?.name ? `${me.name}님의 오답 파일` : "내 오답 파일"}
               </div>
 
-              {wrongErr && <div style={{ color: "#d00", marginTop: 8 }}>{wrongErr}</div>}
+              {wrongErr && <div style={{ color: COLORS.danger, marginTop: 8, fontWeight: 900 }}>{wrongErr}</div>}
 
               <div
                 style={{
                   marginTop: 10,
-                  border: "1px solid #ffd3e3",
+                  border: `1px solid ${COLORS.border}`,
                   borderRadius: 14,
                   padding: 12,
                   background: "#fff",
+                  color: COLORS.text,
                 }}
               >
                 {wrongLoading ? (
-                  <div style={{ fontSize: 13, color: "#777" }}>불러오는 중…</div>
+                  <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div>
                 ) : wrongByMonth.length === 0 ? (
-                  <div style={{ fontSize: 13, color: "#777" }}>
+                  <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
                     아직 오답 파일이 없어요. (공식시험 확정 후 자동 생성됩니다.)
                   </div>
                 ) : (
@@ -450,7 +532,7 @@ export default function BookRangePage({ mode = "practice" }) {
 
                       return (
                         <div key={month}>
-                          {/* ✅ 월 헤더 + 월 전체선택 */}
+                          {/* 월 헤더 + 월 전체선택 */}
                           <div
                             style={{
                               display: "flex",
@@ -460,9 +542,9 @@ export default function BookRangePage({ mode = "practice" }) {
                               marginBottom: 8,
                             }}
                           >
-                            <div style={{ fontWeight: 900, color: "#1f2a44" }}>
+                            <div style={{ fontWeight: 900, color: COLORS.text }}>
                               📁 {month}{" "}
-                              <span style={{ fontSize: 12, color: "#777" }}>({monthCount}개)</span>
+                              <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>({monthCount}개)</span>
                             </div>
 
                             <button
@@ -470,8 +552,8 @@ export default function BookRangePage({ mode = "practice" }) {
                               onClick={() => toggleMonthAll(rows)}
                               style={{
                                 ...miniBtn,
-                                border: monthAll ? "1px solid #ff6fa3" : "1px solid #ffd3e3",
-                                color: monthAll ? "#ff6fa3" : "#1f2a44",
+                                border: monthAll ? `1px solid ${COLORS.pink}` : `1px solid ${COLORS.border}`,
+                                color: monthAll ? COLORS.pink : COLORS.text,
                               }}
                               disabled={!monthCount}
                               title="이 달의 파일을 한 번에 선택/해제"
@@ -487,14 +569,15 @@ export default function BookRangePage({ mode = "practice" }) {
                                 <label
                                   key={r.id}
                                   style={{
-                                    border: "1px solid #ffe1ec",
+                                    border: `1px solid ${COLORS.border2}`,
                                     borderRadius: 12,
                                     padding: 10,
-                                    background: checked ? "#fff0f5" : "#fff",
+                                    background: checked ? COLORS.pinkSoft : "#fff",
                                     cursor: "pointer",
                                     display: "flex",
                                     gap: 10,
                                     alignItems: "flex-start",
+                                    color: COLORS.text,
                                   }}
                                 >
                                   <input
@@ -504,8 +587,8 @@ export default function BookRangePage({ mode = "practice" }) {
                                     style={{ marginTop: 3 }}
                                   />
                                   <div style={{ flex: 1 }}>
-                                    <div style={{ fontWeight: 900 }}>{r.title}</div>
-                                    <div style={{ fontSize: 12, color: "#777", marginTop: 4 }}>
+                                    <div style={{ fontWeight: 900, color: COLORS.text }}>{r.title}</div>
+                                    <div style={{ fontSize: 12, color: COLORS.sub, marginTop: 4, fontWeight: 800 }}>
                                       원본: {r.source_book || "—"}{" "}
                                       {r.source_chapters_text ? `(${r.source_chapters_text})` : ""}
                                     </div>
@@ -534,39 +617,31 @@ export default function BookRangePage({ mode = "practice" }) {
                   </button>
                 </div>
 
-                <div style={{ marginTop: 10, fontSize: 12, color: "#777" }}>
+                <div style={{ marginTop: 10, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
                   * 월 전체선택도 되고, 파일별로도 선택할 수 있어요.
                 </div>
               </div>
 
               {/* 오답 시험 보기 버튼들 */}
               <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-                <button className="button-lg" onClick={() => goWrong("/practice/mcq")}>
+                <button type="button" onClick={() => goWrong("/practice/mcq")} style={primaryBtn}>
                   오답 시험보기 → 객관식
                 </button>
-                <button
-                  className="button-lg"
-                  style={{
-                    background: "#fff",
-                    color: "#ff6fa3",
-                    border: "2px solid #ff8fb7",
-                  }}
-                  onClick={() => goWrong("/practice/mock")}
-                >
+                <button type="button" onClick={() => goWrong("/practice/mock")} style={outlinePinkBtn}>
                   오답 시험보기 → 모의시험
                 </button>
               </div>
             </>
           ) : (
             /* =========================
-                정규 탭 UI (기존 그대로)
+                정규 탭 UI
             ========================= */
             <>
-              {err && <div style={{ color: "#d00" }}>{err}</div>}
+              {err && <div style={{ color: COLORS.danger, fontWeight: 900 }}>{err}</div>}
 
-              {/* ✅ 맨 상단: 단어책 검색칸(추가) */}
+              {/* 단어책 검색 */}
               <div>
-                <div style={{ fontWeight: 900, marginBottom: 6 }}>단어책 검색</div>
+                <div style={{ fontWeight: 900, marginBottom: 6, color: COLORS.text }}>단어책 검색</div>
                 <input
                   style={fieldStyle}
                   value={bookSearch}
@@ -578,16 +653,17 @@ export default function BookRangePage({ mode = "practice" }) {
                   <div
                     style={{
                       marginTop: 8,
-                      border: "1px solid #ffd3e3",
+                      border: `1px solid ${COLORS.border}`,
                       borderRadius: 12,
                       background: "#fff",
                       padding: 10,
+                      color: COLORS.text,
                     }}
                   >
                     {loading ? (
-                      <div style={{ fontSize: 13, color: "#777" }}>불러오는 중…</div>
+                      <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div>
                     ) : searchedBooks.length === 0 ? (
-                      <div style={{ fontSize: 13, color: "#777" }}>검색 결과가 없어요.</div>
+                      <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>검색 결과가 없어요.</div>
                     ) : (
                       <div style={{ display: "grid", gap: 8 }}>
                         {searchedBooks.map((book) => {
@@ -596,13 +672,14 @@ export default function BookRangePage({ mode = "practice" }) {
                             <div
                               key={book}
                               style={{
-                                border: "1px solid #ffe1ec",
-                                borderRadius: 10,
+                                border: `1px solid ${COLORS.border2}`,
+                                borderRadius: 12,
                                 padding: 10,
-                                background: checked ? "#fff0f5" : "#fff",
+                                background: checked ? COLORS.pinkSoft : "#fff",
+                                color: COLORS.text,
                               }}
                             >
-                              <label style={{ fontWeight: 900, cursor: "pointer" }}>
+                              <label style={{ fontWeight: 900, cursor: "pointer", color: COLORS.text }}>
                                 <input type="checkbox" checked={checked} onChange={() => toggleBook(book)} /> {book}
                               </label>
 
@@ -625,28 +702,28 @@ export default function BookRangePage({ mode = "practice" }) {
                       </div>
                     )}
 
-                    <div style={{ marginTop: 8, fontSize: 12, color: "#777" }}>
+                    <div style={{ marginTop: 8, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
                       * 여기서 체크한 책도 아래 “선택한 책 목록”에 자동 반영돼요.
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* ======= 아래는 기존 그대로 ======= */}
-
-              <h3 style={{ marginTop: 16 }}>분류 선택</h3>
-              <div style={{ maxHeight: 260, overflow: "auto" }}>{loading ? "불러오는 중…" : renderTree(null)}</div>
+              {/* 분류 선택 */}
+              <h3 style={{ marginTop: 16, color: COLORS.text }}>분류 선택</h3>
+              <div style={{ maxHeight: 260, overflow: "auto", color: COLORS.text }}>
+                {loading ? <div style={{ color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div> : renderTree(null)}
+              </div>
 
               {selectedCategoryId && (
                 <>
-                  <h3 style={{ marginTop: 16 }}>책 선택 + 챕터 범위</h3>
+                  <h3 style={{ marginTop: 16, color: COLORS.text }}>책 선택 + 챕터 범위</h3>
 
-                  {/* ✅ 기존: 분류 내 책 목록(체크박스) 그대로 */}
                   {booksInCategory.map((b) => {
                     const checked = selectedBooks.has(b.book);
                     return (
                       <div key={b.book} style={{ marginTop: 10 }}>
-                        <label style={{ fontWeight: 900 }}>
+                        <label style={{ fontWeight: 900, color: COLORS.text }}>
                           <input type="checkbox" checked={checked} onChange={() => toggleBook(b.book)} /> {b.book}
                         </label>
 
@@ -667,25 +744,26 @@ export default function BookRangePage({ mode = "practice" }) {
                     );
                   })}
 
-                  {/* =========================
-                     ✅ 추가: 선택한 책 목록(기존 기능 건드리지 않고 "추가"만)
-                  ========================= */}
+                  {/* 선택한 책 목록 */}
                   <div
                     style={{
                       marginTop: 16,
                       padding: 12,
                       borderRadius: 12,
-                      border: "1px dashed #ff9fc0",
-                      background: "#fff0f5",
+                      border: `1px dashed ${COLORS.pink2}`,
+                      background: COLORS.pinkSoft,
+                      color: COLORS.text,
                     }}
                   >
-                    <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                    <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.text }}>
                       선택한 책 목록{" "}
-                      <span style={{ fontSize: 12, color: "#777" }}>({selectedBookList.length}권)</span>
+                      <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
+                        ({selectedBookList.length}권)
+                      </span>
                     </div>
 
                     {selectedBookList.length === 0 ? (
-                      <div style={{ fontSize: 13, color: "#777" }}>
+                      <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
                         아직 선택된 책이 없어요. 위에서 책을 체크해 주세요.
                       </div>
                     ) : (
@@ -694,10 +772,11 @@ export default function BookRangePage({ mode = "practice" }) {
                           <div
                             key={book}
                             style={{
-                              border: "1px solid #ffd3e3",
+                              border: `1px solid ${COLORS.border}`,
                               borderRadius: 12,
                               padding: 10,
                               background: "#fff",
+                              color: COLORS.text,
                             }}
                           >
                             <div
@@ -708,21 +787,21 @@ export default function BookRangePage({ mode = "practice" }) {
                                 gap: 10,
                               }}
                             >
-                              <div style={{ fontWeight: 900, color: "#1f2a44" }}>{book}</div>
+                              <div style={{ fontWeight: 900, color: COLORS.text }}>{book}</div>
 
-                              {/* 선택 해제 버튼 */}
                               <button
                                 type="button"
                                 onClick={() => unselectBook(book)}
                                 style={{
                                   padding: "6px 10px",
                                   borderRadius: 10,
-                                  border: "1px solid #ffb8c9",
+                                  border: `1px solid ${COLORS.pink2}`,
                                   background: "#fff",
-                                  color: "#b00020",
+                                  color: COLORS.danger,
                                   fontWeight: 900,
                                   cursor: "pointer",
                                   whiteSpace: "nowrap",
+                                  boxShadow: "0 8px 18px rgba(31,42,68,0.06)",
                                 }}
                                 title="선택 해제"
                               >
@@ -730,7 +809,6 @@ export default function BookRangePage({ mode = "practice" }) {
                               </button>
                             </div>
 
-                            {/* 범위 수정(= chaptersByBook 수정) */}
                             <div style={{ marginTop: 8 }}>
                               <input
                                 style={fieldStyle}
@@ -743,7 +821,7 @@ export default function BookRangePage({ mode = "practice" }) {
                                 }
                                 placeholder="예: 4-8, 10"
                               />
-                              <div style={{ marginTop: 6, fontSize: 12, color: "#777" }}>
+                              <div style={{ marginTop: 6, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
                                 여기서 범위를 수정하면 바로 반영돼요.
                               </div>
                             </div>
@@ -757,23 +835,15 @@ export default function BookRangePage({ mode = "practice" }) {
 
               <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
                 {isOfficial ? (
-                  <button className="button-lg" onClick={() => go("/exam/official")}>
+                  <button type="button" onClick={() => go("/exam/official")} style={primaryBtn}>
                     시험보기(공식)
                   </button>
                 ) : (
                   <>
-                    <button className="button-lg" onClick={() => go("/practice/mcq")}>
+                    <button type="button" onClick={() => go("/practice/mcq")} style={primaryBtn}>
                       연습하기 → 객관식
                     </button>
-                    <button
-                      className="button-lg"
-                      style={{
-                        background: "#fff",
-                        color: "#ff6fa3",
-                        border: "2px solid #ff8fb7",
-                      }}
-                      onClick={() => go("/practice/mock")}
-                    >
+                    <button type="button" onClick={() => go("/practice/mock")} style={outlinePinkBtn}>
                       연습하기 → 모의시험
                     </button>
                   </>
@@ -786,28 +856,3 @@ export default function BookRangePage({ mode = "practice" }) {
     </StudentShell>
   );
 }
-
-const fieldStyle = {
-  width: "100%",
-  padding: "10px 12px",
-  border: "1px solid #ffd3e3",
-  borderRadius: 10,
-  fontSize: 14,
-};
-
-const tabBtn = {
-  flex: 1,
-  padding: "10px 12px",
-  borderRadius: 12,
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const miniBtn = {
-  padding: "8px 10px",
-  borderRadius: 10,
-  border: "1px solid #ffd3e3",
-  background: "#fff",
-  fontWeight: 900,
-  cursor: "pointer",
-};

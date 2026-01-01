@@ -14,13 +14,89 @@ import { getSession } from '../utils/session';
 import useExamFocusGuard from '../hooks/useExamFocusGuard';
 import StudentShell from './StudentShell';
 
+const COLORS = {
+  bg: '#fff5f8',
+  card: '#ffffff',
+  text: '#1f2a44',
+  sub: '#5d6b82',
+  border: '#ffd3e3',
+  pink: '#ff6fa3',
+  pink2: '#ff8fb7',
+  pinkSoft: '#fff0f5',
+  ok: '#0a7a3d',
+  nok: '#b00020',
+};
+
 const styles = {
-  input: { width: '100%', padding: '12px 14px', border: '1px solid #ffd3e3', borderRadius: 10, outline: 'none', fontSize: 14 },
-  btn: { padding: '12px 16px', borderRadius: 10, border: 'none', color: '#fff', fontWeight: 700, cursor: 'pointer', background: '#ff6fa3' },
-  term: { fontSize: 28, fontWeight: 900, color: '#333', textAlign: 'center' },
-  timer: { fontSize: 14, color: '#ff6fa3', textAlign: 'center', marginTop: 6 },
-  info: { fontSize: 13, color: '#777' },
-  warn: { background: '#fff0f5', border: '1px solid #ffd3e3', padding: '10px 12px', borderRadius: 10, marginTop: 12, color: '#b00020' },
+  topCard: {
+    background: COLORS.card,
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 14,
+    padding: 16,
+    boxShadow: '0 10px 30px rgba(255,111,163,.10)',
+    color: COLORS.text,
+  },
+
+  row: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: 12,
+    marginTop: 12,
+  },
+
+  label: { fontSize: 13, color: COLORS.text, fontWeight: 900, marginBottom: 6 },
+
+  input: {
+    width: '100%',
+    padding: '12px 14px',
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 12,
+    outline: 'none',
+    fontSize: 14,
+    color: COLORS.text,
+    background: '#fff',
+    fontWeight: 800,
+    boxShadow: '0 8px 18px rgba(31,42,68,0.06)',
+  },
+
+  // ✅ 전역 button CSS 영향 방지: 항상 이 스타일로 고정
+  btn: {
+    padding: '12px 16px',
+    borderRadius: 12,
+    border: 'none',
+    color: '#fff',
+    fontWeight: 900,
+    cursor: 'pointer',
+    background: COLORS.pink,
+    boxShadow: '0 10px 20px rgba(255,111,163,.18)',
+  },
+  ghostBtn: {
+    padding: '12px 16px',
+    borderRadius: 12,
+    border: `1px solid ${COLORS.border}`,
+    color: COLORS.text,
+    fontWeight: 900,
+    cursor: 'pointer',
+    background: '#fff',
+    boxShadow: '0 10px 20px rgba(31,42,68,0.06)',
+  },
+
+  term: { fontSize: 28, fontWeight: 900, color: COLORS.text, textAlign: 'center', marginTop: 10 },
+  timer: { fontSize: 14, color: COLORS.pink, textAlign: 'center', marginTop: 6, fontWeight: 900 },
+  info: { fontSize: 13, color: COLORS.sub, fontWeight: 800, marginTop: 4 },
+
+  warn: {
+    background: COLORS.pinkSoft,
+    border: `1px solid ${COLORS.border}`,
+    padding: '10px 12px',
+    borderRadius: 12,
+    marginTop: 12,
+    color: COLORS.nok,
+    fontWeight: 900,
+  },
+
+  metaLine: { display: 'flex', justifyContent: 'space-between', gap: 10, color: COLORS.text, fontWeight: 900 },
+  metaCenter: { marginTop: 6, fontSize: 12, color: COLORS.sub, textAlign: 'center', fontWeight: 800 },
 };
 
 function useQuery() {
@@ -51,7 +127,7 @@ function normalizeInput({ locState, query }) {
   const qEnd = query.get('end');
 
   const legacy = {
-    book: (locState?.book) || qBook || '',
+    book: locState?.book || qBook || '',
     chapters: (() => {
       const st = ensureArray(locState?.chapters);
       if (st?.length) return st;
@@ -285,13 +361,8 @@ export default function OfficialExamPage() {
           const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
           let range = [];
-          if (chapters.length > 0) {
-            range = await fetchWordsByChapters(book, chapters);
-          } else if (hasRange) {
-            range = await fetchWordsInRange(book, sel.start, sel.end);
-          } else {
-            range = [];
-          }
+          if (chapters.length > 0) range = await fetchWordsByChapters(book, chapters);
+          else if (hasRange) range = await fetchWordsInRange(book, sel.start, sel.end);
 
           const withBook = (range || []).map((w) => ({ ...w, book: w.book || book }));
           chunks.push(...withBook);
@@ -463,7 +534,7 @@ export default function OfficialExamPage() {
         student_name: profileName,
         teacher_name: profileTeacher,
         // ✅ 대표 book(정규=첫 선택, 오답=오답)
-        book: (mode === 'wrong') ? '오답' : (selections?.[0]?.book || legacy.book || null),
+        book: mode === 'wrong' ? '오답' : (selections?.[0]?.book || legacy.book || null),
         chapters_text: chaptersText,
         chapter_start: bounds.chapter_start,
         chapter_end: bounds.chapter_end,
@@ -501,7 +572,7 @@ export default function OfficialExamPage() {
     setAnswer('');
     answerRef.current = '';
     submittedRef.current = false;
-    setInputKey(k => k + 1);
+    setInputKey((k) => k + 1);
     setTimeout(() => inputRef.current?.focus(), 50);
   }
 
@@ -509,7 +580,7 @@ export default function OfficialExamPage() {
   useEffect(() => {
     if (phase === 'exam') {
       submittedRef.current = false;
-      setInputKey(k => k + 1);
+      setInputKey((k) => k + 1);
       setIsComposing(false);
     }
   }, [phase, i]);
@@ -614,7 +685,7 @@ export default function OfficialExamPage() {
             student_id: me?.id,
             student_name: profileName,
             teacher_name: profileTeacher,
-            book: (mode === 'wrong') ? '오답' : (selections?.[0]?.book || legacy.book || null),
+            book: mode === 'wrong' ? '오답' : (selections?.[0]?.book || legacy.book || null),
             chapters_text: chaptersText,
             chapter_start: bounds.chapter_start,
             chapter_end: bounds.chapter_end,
@@ -693,7 +764,9 @@ export default function OfficialExamPage() {
       <StudentShell>
         <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
           <div className="student-container">
-            <div className="student-card stack">잘못된 접근입니다.</div>
+            <div className="student-card" style={{ ...styles.topCard, textAlign: 'center' }}>
+              잘못된 접근입니다.
+            </div>
           </div>
         </div>
       </StudentShell>
@@ -722,18 +795,18 @@ export default function OfficialExamPage() {
     <StudentShell>
       <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
         <div className="student-container">
-          <div className="student-card stack">
+          <div className="student-card" style={styles.topCard}>
             {/* config 단계 */}
             {phase === 'config' && (
               <>
                 <div className="student-row">
                   <div>
-                    <div style={{ fontSize: 13, color: '#444' }}>책 / 범위</div>
+                    <div style={styles.label}>책 / 범위</div>
                     <div style={styles.info}>{rangeTextForConfig}</div>
                   </div>
                   <div />
                   <div>
-                    <div style={{ fontSize: 13, color: '#444' }}>문제 수</div>
+                    <div style={styles.label}>문제 수</div>
                     <input
                       style={styles.input}
                       value={numQ}
@@ -745,7 +818,7 @@ export default function OfficialExamPage() {
                     />
                   </div>
                   <div>
-                    <div style={{ fontSize: 13, color: '#444' }}>커트라인(-X컷)</div>
+                    <div style={styles.label}>커트라인(-X컷)</div>
                     <input
                       style={styles.input}
                       value={cutMiss}
@@ -757,8 +830,14 @@ export default function OfficialExamPage() {
                     />
                   </div>
                 </div>
-                <div style={{ marginTop: 12 }}>
-                  <button className="btn" style={styles.btn} onClick={startExam}>시작하기</button>
+
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="button" style={styles.btn} onClick={startExam}>
+                    시작하기
+                  </button>
+                  <button type="button" style={styles.ghostBtn} onClick={() => nav('/study')}>
+                    범위 다시 선택
+                  </button>
                 </div>
               </>
             )}
@@ -766,13 +845,13 @@ export default function OfficialExamPage() {
             {/* exam 단계 */}
             {phase === 'exam' && (
               <div style={{ marginTop: 6 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                <div style={styles.metaLine}>
                   <div>문항 {i + 1} / {seq.length}</div>
                   <div>맞춘 개수: {corrects}</div>
                 </div>
 
                 {currentMetaText && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: '#777', textAlign: 'center' }}>
+                  <div style={styles.metaCenter}>
                     {currentMetaText}
                   </div>
                 )}
@@ -800,8 +879,8 @@ export default function OfficialExamPage() {
                   />
                 </div>
 
-                <div style={{ marginTop: 12 }}>
-                  <button className="btn" style={styles.btn} onClick={() => submitCurrent(answerRef.current)}>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <button type="button" style={styles.btn} onClick={() => submitCurrent(answerRef.current)}>
                     제출(Enter)
                   </button>
                 </div>
@@ -816,8 +895,8 @@ export default function OfficialExamPage() {
                   시험 결과는 선생님 검수 후 전달됩니다. 잠시만 기다려 주세요.
                 </div>
                 <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="btn" style={styles.btn} onClick={() => nav('/study')}>다른 범위로 공부</button>
-                  <button className="btn" style={styles.btn} onClick={() => nav('/dashboard')}>대시보드</button>
+                  <button type="button" style={styles.btn} onClick={() => nav('/study')}>다른 범위로 공부</button>
+                  <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>대시보드</button>
                 </div>
               </div>
             )}

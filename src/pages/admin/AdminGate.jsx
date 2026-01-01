@@ -17,6 +17,10 @@ import { supabase } from "../../utils/supabaseClient";
  * ✅ 추가
  * - 왼쪽 상단 "← 뒤로" 버튼 (history 없으면 /dashboard로)
  * - /dashboard에서는 버튼 숨김(원하면 아래 hideBack 로직 제거 가능)
+ *
+ * ✅ UI 색상 정리(중요)
+ * - AdminGate가 감싸는 모든 관리자 페이지에 기본 배경/기본 글자색을 강제 적용
+ * - "흰 배경 + 흰 글씨" 같은 대비 문제를 전역에서 1차로 차단
  */
 
 // --- WebAudio 딩 사운드 (짧게) ---
@@ -52,9 +56,77 @@ function playDing() {
   }
 }
 
+// ✅ 관리자 기본 톤(여기만 바꿔도 전체 페이지 대비가 확 좋아짐)
+const THEME = {
+  bg: "#f7f9fc",
+  card: "#ffffff",
+  text: "#1f2a44",
+  subText: "#5d6b82",
+  border: "#e9eef5",
+  pink: "#ff6fa3",
+  pinkSoft: "#fff0f5",
+  danger: "#b00020",
+};
+
+const ui = {
+  pillBtn: {
+    height: 34,
+    padding: "0 12px",
+    borderRadius: 999,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+    // ✅ 기본 글자색을 확실히 잡아 “흰 글씨” 사고 방지
+    color: THEME.text,
+    background: THEME.card,
+    border: `1px solid ${THEME.border}`,
+  },
+  dangerPill: {
+    height: 34,
+    padding: "0 12px",
+    borderRadius: 999,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+    color: THEME.text,
+    background: THEME.card,
+    border: "1px solid #ffd3e3",
+  },
+  toastBtnPrimary: {
+    border: "none",
+    background: THEME.pink,
+    color: "#fff",
+    fontWeight: 800,
+    padding: "8px 10px",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontSize: 13,
+  },
+  toastBtnSecondary: {
+    border: "1px solid #ffd3e3",
+    background: THEME.pinkSoft,
+    color: THEME.danger,
+    fontWeight: 800,
+    padding: "8px 10px",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontSize: 13,
+  },
+  toastBtnNeutral: {
+    border: "1px solid #eee",
+    background: "#f7f7f7",
+    color: "#374151",
+    fontWeight: 800,
+    padding: "8px 10px",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontSize: 13,
+  },
+};
+
 export default function AdminGate() {
   const navigate = useNavigate();
-  const location = useLocation(); // ✅ 추가: 현재 경로 확인용
+  const location = useLocation();
   const role = sessionStorage.getItem("role"); // 'admin' | 'student' | null
 
   // admin 아니면 즉시 차단
@@ -63,11 +135,9 @@ export default function AdminGate() {
   }
 
   // ✅ 왼쪽 상단 뒤로가기 버튼
-  // - /dashboard에서는 숨김(원하면 아래 한 줄 지우면 항상 표시)
   const hideBack = location?.pathname === "/dashboard";
 
   function goBack() {
-    // 히스토리가 있으면 뒤로, 없으면 대시보드로
     if (window.history.length > 1) {
       navigate(-1);
     } else {
@@ -89,12 +159,10 @@ export default function AdminGate() {
     sessionStorage.getItem("admin_audio_unlocked") === "1"
   );
 
-  // 중복/스팸 방지: 같은 session_id에서 짧은 시간 연속 이벤트 무시
+  // 중복/스팸 방지
   const lastBySessionRef = useRef(new Map()); // session_id -> lastTime(ms)
 
   // ✅ 폴링용 마지막 확인 시각
-  // 기존: new Date().toISOString() → 진입 직후 이벤트 놓칠 수 있음
-  // 변경: 최근 30초부터 시작 → "페이지 들어오고 바로 발생한" 이벤트도 잡음
   const lastSeenIsoRef = useRef(new Date(Date.now() - 30_000).toISOString());
   const pollTimerRef = useRef(null);
 
@@ -132,18 +200,16 @@ export default function AdminGate() {
       playDing();
     }
 
-    // 6초 후 자동 닫힘
     toastTimerRef.current = setTimeout(() => {
       setToast(null);
       toastTimerRef.current = null;
     }, 6000);
   }
 
-  // ✅ 공통: 스팸 방지 체크 후 토스트
   function maybeToast(row) {
     if (!row) return;
 
-    // 스팸 방지: 같은 session_id에서 2초 이내 연속 이벤트는 무시
+    // 같은 session_id에서 2초 이내 연속 이벤트 무시
     const sid = row.session_id || "";
     const now = Date.now();
     if (sid) {
@@ -166,10 +232,8 @@ export default function AdminGate() {
           const row = payload?.new;
           if (!row) return;
 
-          // 디버그 로그(원하면 나중에 제거)
           console.log("[AdminGate] realtime focus_events INSERT:", row);
 
-          // 폴링 lastSeen도 같이 갱신 (중복 방지)
           if (row.created_at) {
             const cur = lastSeenIsoRef.current;
             if (!cur || row.created_at > cur) lastSeenIsoRef.current = row.created_at;
@@ -179,7 +243,6 @@ export default function AdminGate() {
         }
       )
       .subscribe((status) => {
-        // 디버그: 구독 상태 확인
         console.log("[AdminGate] realtime subscribe status:", status);
       });
 
@@ -192,11 +255,10 @@ export default function AdminGate() {
     };
   }, []);
 
-  // ✅ 2) Fallback Polling (Realtime이 안 와도 토스트 뜨게)
+  // ✅ 2) Fallback Polling
   useEffect(() => {
     async function pollNew() {
       try {
-        // 마지막 본 시각 이후 새 이벤트만
         const afterIso =
           lastSeenIsoRef.current || new Date(Date.now() - 10_000).toISOString();
 
@@ -215,11 +277,9 @@ export default function AdminGate() {
         const rows = data || [];
         if (rows.length === 0) return;
 
-        // lastSeen 갱신 (가장 마지막 created_at)
         const last = rows[rows.length - 1];
         if (last?.created_at) lastSeenIsoRef.current = last.created_at;
 
-        // 새 이벤트들 토스트(스팸방지 통과한 것만)
         for (const r of rows) {
           console.log("[AdminGate] polling new row:", r);
           maybeToast(r);
@@ -229,10 +289,7 @@ export default function AdminGate() {
       }
     }
 
-    // 3초마다 확인
     pollTimerRef.current = setInterval(pollNew, 3000);
-
-    // 최초 1회 즉시 실행
     pollNew();
 
     return () => {
@@ -250,7 +307,7 @@ export default function AdminGate() {
 
   const sessionId = toast?.row?.session_id || null;
 
-  // ✅ 오디오 unlock 버튼 (한번 클릭 필요)
+  // ✅ 오디오 unlock 버튼
   async function unlockAudioOnce() {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -259,11 +316,9 @@ export default function AdminGate() {
         return;
       }
       const ctx = new AudioCtx();
-      // iOS/Chrome 정책: resume 필요
       if (ctx.state === "suspended") {
         await ctx.resume();
       }
-      // 짧게 무음 재생(언락 목적)
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       gain.gain.value = 0.0001;
@@ -279,7 +334,6 @@ export default function AdminGate() {
 
       setAudioUnlocked(true);
       sessionStorage.setItem("admin_audio_unlocked", "1");
-      // 테스트 딩
       playDing();
       alert("소리 켜짐(한번) 완료! 이제 알림 소리가 납니다.");
     } catch (e) {
@@ -290,223 +344,189 @@ export default function AdminGate() {
 
   return (
     <>
-      {/* ✅ 왼쪽 상단 뒤로가기 (AdminGate가 감싸는 모든 페이지에 공통 적용) */}
-      {!hideBack && (
-        <button
-          onClick={goBack}
-          style={{
-            position: "fixed",
-            top: 10,
-            left: 12,
-            zIndex: 99998, // 우측 상단 컨트롤(99998)과 같은 레벨
-            height: 34,
-            padding: "0 12px",
-            borderRadius: 999,
-            border: "1px solid #eee",
-            background: "#fff",
-            fontWeight: 900,
-            cursor: "pointer",
-            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-          }}
-          title="뒤로가기"
-          aria-label="뒤로가기"
-        >
-          ← 뒤로
-        </button>
-      )}
-
-      {/* ✅ 전역 상단 작은 컨트롤(어느 관리자 페이지든) */}
+      {/* ✅ AdminGate가 감싸는 전역 UI 톤: 배경/기본 글자색 강제 */}
       <div
         style={{
-          position: "fixed",
-          top: 10,
-          right: 12,
-          zIndex: 99998,
-          display: "flex",
-          gap: 8,
-          alignItems: "center",
-          flexWrap: "wrap",
+          minHeight: "100vh",
+          background: THEME.bg,
+          color: THEME.text, // ✅ 기본 글자색(중요)
         }}
       >
-        <button
-          onClick={unlockAudioOnce}
-          style={{
-            height: 34,
-            padding: "0 12px",
-            borderRadius: 999,
-            border: "1px solid #ffd3e3",
-            background: "#fff",
-            fontWeight: 900,
-            cursor: "pointer",
-            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-          }}
-          title="브라우저 정책 때문에 알림 소리는 한 번 클릭으로 활성화가 필요해요."
-        >
-          {audioUnlocked ? "🔊 소리 켜짐" : "🔊 소리 켜기(한번)"}
-        </button>
+        {/* ✅ 왼쪽 상단 뒤로가기 */}
+        {!hideBack && (
+          <button
+            onClick={goBack}
+            style={{
+              ...ui.pillBtn,
+              position: "fixed",
+              top: 10,
+              left: 12,
+              zIndex: 99998,
+            }}
+            title="뒤로가기"
+            aria-label="뒤로가기"
+          >
+            ← 뒤로
+          </button>
+        )}
 
-        <button
-          onClick={() => {
-            const next = !soundEnabled;
-            setSoundEnabled(next);
-            sessionStorage.setItem("admin_sound_enabled", next ? "1" : "0");
-            if (next && audioUnlocked) playDing();
-          }}
-          style={{
-            height: 34,
-            padding: "0 12px",
-            borderRadius: 999,
-            border: "none",
-            background: soundEnabled ? "#ff6fa3" : "#f0f0f0",
-            color: soundEnabled ? "#fff" : "#444",
-            fontWeight: 900,
-            cursor: "pointer",
-            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-          }}
-          title="알림 소리 on/off"
-        >
-          {soundEnabled ? "🔔 켜짐" : "🔕 꺼짐"}
-        </button>
-      </div>
-
-      <Outlet />
-
-      {/* ✅ 전역 토스트 */}
-      {toast && (
+        {/* ✅ 전역 상단 작은 컨트롤 */}
         <div
           style={{
             position: "fixed",
-            right: 16,
-            bottom: 16,
-            zIndex: 99999,
-            width: "min(360px, calc(100vw - 32px))",
-            background: "#fff",
-            border: "1px solid #ffd3e3",
-            borderRadius: 12,
-            boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
-            padding: 12,
+            top: 10,
+            right: 12,
+            zIndex: 99998,
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            flexWrap: "wrap",
           }}
-          role="status"
-          aria-live="polite"
         >
+          <button
+            onClick={unlockAudioOnce}
+            style={{
+              ...ui.dangerPill,
+            }}
+            title="브라우저 정책 때문에 알림 소리는 한 번 클릭으로 활성화가 필요해요."
+          >
+            {audioUnlocked ? "🔊 소리 켜짐" : "🔊 소리 켜기(한번)"}
+          </button>
+
+          <button
+            onClick={() => {
+              const next = !soundEnabled;
+              setSoundEnabled(next);
+              sessionStorage.setItem("admin_sound_enabled", next ? "1" : "0");
+              if (next && audioUnlocked) playDing();
+            }}
+            style={{
+              height: 34,
+              padding: "0 12px",
+              borderRadius: 999,
+              border: "none",
+              background: soundEnabled ? THEME.pink : "#f0f0f0",
+              color: soundEnabled ? "#fff" : THEME.text, // ✅ 꺼짐일 때 글자색 확실히
+              fontWeight: 900,
+              cursor: "pointer",
+              boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+            }}
+            title="알림 소리 on/off"
+          >
+            {soundEnabled ? "🔔 켜짐" : "🔕 꺼짐"}
+          </button>
+        </div>
+
+        <Outlet />
+
+        {/* ✅ 전역 토스트 */}
+        {toast && (
           <div
             style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: 8,
-              alignItems: "flex-start",
+              position: "fixed",
+              right: 16,
+              bottom: 16,
+              zIndex: 99999,
+              width: "min(360px, calc(100vw - 32px))",
+              background: THEME.card,
+              color: THEME.text, // ✅ 토스트 글자색 강제(중요)
+              border: "1px solid #ffd3e3",
+              borderRadius: 12,
+              boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+              padding: 12,
             }}
+            role="status"
+            aria-live="polite"
           >
-            <div style={{ fontWeight: 900, fontSize: 14, color: "#333" }}>
-              {toast.title}
-            </div>
-            <button
-              onClick={() => setToast(null)}
-              style={{
-                border: "none",
-                background: "transparent",
-                cursor: "pointer",
-                fontSize: 16,
-                lineHeight: "16px",
-                padding: 2,
-                color: "#999",
-              }}
-              aria-label="닫기"
-              title="닫기"
-            >
-              ×
-            </button>
-          </div>
-
-          <div style={{ marginTop: 6, fontSize: 13, color: "#555" }}>
-            {toast.msg}
-          </div>
-
-          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              onClick={() => {
-                if (sessionId) {
-                  navigate(`/teacher/review/${sessionId}`, { replace: false });
-                  return;
-                }
-                navigate("/teacher/focus", { replace: false });
-              }}
-              style={{
-                border: "none",
-                background: "#ff6fa3",
-                color: "#fff",
-                fontWeight: 800,
-                padding: "8px 10px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-              title={sessionId ? `검수 페이지로 이동: ${sessionId}` : "세션 정보 없음"}
-            >
-              검수 페이지로 이동
-            </button>
-
-            <button
-              onClick={() => navigate("/teacher/focus", { replace: false })}
-              style={{
-                border: "1px solid #ffd3e3",
-                background: "#fff0f5",
-                color: "#b00020",
-                fontWeight: 800,
-                padding: "8px 10px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-            >
-              집중 모니터
-            </button>
-
-            <button
-              onClick={() => setToast(null)}
-              style={{
-                border: "1px solid #eee",
-                background: "#f7f7f7",
-                color: "#444",
-                fontWeight: 800,
-                padding: "8px 10px",
-                borderRadius: 10,
-                cursor: "pointer",
-                fontSize: 13,
-              }}
-            >
-              닫기
-            </button>
-          </div>
-
-          {/* detail 미리보기 */}
-          {toast?.row?.detail && (
             <div
               style={{
-                marginTop: 10,
-                fontSize: 12,
-                color: "#777",
-                background: "#fafafa",
-                border: "1px solid #eee",
-                borderRadius: 10,
-                padding: 10,
-                maxHeight: 120,
-                overflow: "auto",
-                whiteSpace: "pre-wrap",
-                wordBreak: "break-word",
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+                alignItems: "flex-start",
               }}
             >
-              {(() => {
-                try {
-                  return JSON.stringify(toast.row.detail, null, 2);
-                } catch {
-                  return String(toast.row.detail);
-                }
-              })()}
+              <div style={{ fontWeight: 900, fontSize: 14, color: THEME.text }}>
+                {toast.title}
+              </div>
+              <button
+                onClick={() => setToast(null)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  fontSize: 16,
+                  lineHeight: "16px",
+                  padding: 2,
+                  color: "#6b7280", // ✅ 회색
+                }}
+                aria-label="닫기"
+                title="닫기"
+              >
+                ×
+              </button>
             </div>
-          )}
-        </div>
-      )}
+
+            <div style={{ marginTop: 6, fontSize: 13, color: THEME.subText }}>
+              {toast.msg}
+            </div>
+
+            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                onClick={() => {
+                  if (sessionId) {
+                    navigate(`/teacher/review/${sessionId}`, { replace: false });
+                    return;
+                  }
+                  navigate("/teacher/focus", { replace: false });
+                }}
+                style={ui.toastBtnPrimary}
+                title={sessionId ? `검수 페이지로 이동: ${sessionId}` : "세션 정보 없음"}
+              >
+                검수 페이지로 이동
+              </button>
+
+              <button
+                onClick={() => navigate("/teacher/focus", { replace: false })}
+                style={ui.toastBtnSecondary}
+              >
+                집중 모니터
+              </button>
+
+              <button onClick={() => setToast(null)} style={ui.toastBtnNeutral}>
+                닫기
+              </button>
+            </div>
+
+            {/* detail 미리보기 */}
+            {toast?.row?.detail && (
+              <div
+                style={{
+                  marginTop: 10,
+                  fontSize: 12,
+                  color: THEME.subText,
+                  background: "#f3f6fb",
+                  border: `1px solid ${THEME.border}`,
+                  borderRadius: 10,
+                  padding: 10,
+                  maxHeight: 120,
+                  overflow: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {(() => {
+                  try {
+                    return JSON.stringify(toast.row.detail, null, 2);
+                  } catch {
+                    return String(toast.row.detail);
+                  }
+                })()}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </>
   );
 }
