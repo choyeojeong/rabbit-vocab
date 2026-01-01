@@ -55,13 +55,8 @@ function SpeakerIcon({ size = 18 }) {
 
 /**
  * selections 정규화
- * - 다중 책: loc.state.selections = [{ book, chapters } ] 또는 [{ book, chaptersText }]
+ * - 다중 책: loc.state.selections = [{ book, chaptersText }] (BookRangePage에서 넘어오는 형태)
  * - 레거시(단일): book + (chapters|start/end) 호환
- *
- * ✅ 핵심 수정:
- * 1) chapters 배열이 오면 그걸 최우선 사용
- * 2) chaptersText가 있으면 파싱해서 사용
- * 3) 둘 다 없으면 start/end를 사용
  */
 function normalizeSelections({ locState, query }) {
   const qBook = query.get('book') || '';
@@ -91,32 +86,16 @@ function normalizeSelections({ locState, query }) {
         const book = (s?.book || '').trim();
         if (!book) return null;
 
-        // ✅ 1) chapters 배열 우선 (BookRangePage 수정 후 이 형태가 정석)
-        let chaptersArr = [];
-        if (Array.isArray(s?.chapters) && s.chapters.length) {
-          chaptersArr = s.chapters
-            .map((n) => Number(n))
-            .filter((n) => Number.isFinite(n));
-        }
-
-        // ✅ 2) chaptersText(또는 문자열 chapters) 파싱
-        const chaptersText = (() => {
-          if (typeof s?.chaptersText === 'string' && s.chaptersText.trim()) return s.chaptersText.trim();
-          if (typeof s?.chapters === 'string' && s.chapters.trim()) return s.chapters.trim();
-          return '';
-        })();
-
-        const parsedFromText = chaptersText ? parseChapterInput(chaptersText) : [];
-
-        // 최종 chapters 결정: 배열 우선 → text 파싱 → 빈 배열
-        const chapters = (chaptersArr.length ? chaptersArr : parsedFromText);
+        // BookRangePage는 chaptersText를 넘김
+        const chaptersText = (s?.chaptersText ?? s?.chapters ?? '').toString().trim();
+        const chapters = chaptersText ? parseChapterInput(chaptersText) : [];
 
         const start = Number(s?.start);
         const end = Number(s?.end);
 
         return {
           book,
-          chaptersText: chaptersText || (chapters.length ? chapters.join(', ') : ''),
+          chaptersText,
           chapters,
           start,
           end,
@@ -135,7 +114,7 @@ function normalizeSelections({ locState, query }) {
     selections: [{
       book: legacy.book,
       chaptersText: legacy._rawChaptersParam || '',
-      chapters: ensureArray(legacy.chapters).map((n) => Number(n)).filter((n) => Number.isFinite(n)),
+      chapters: legacy.chapters,
       start: legacy.start,
       end: legacy.end,
       raw: null
@@ -194,6 +173,13 @@ export default function PracticeMCQ() {
     if (list.length <= 1) return list[0] || '';
     return `${list.length}권 선택: ${list.join(' / ')}`;
   }, [mode, selections, legacy._rawChaptersParam]);
+
+  // ✅ (중요) 훅은 조기 return 위에서 항상 호출되어야 함
+  const currentMetaText = useMemo(() => {
+    const b = current?.book || '';
+    const ch = Number.isFinite(Number(current?.chapter)) ? `${current.chapter}강` : '';
+    return [b, ch].filter(Boolean).join(' | ');
+  }, [current?.book, current?.chapter]);
 
   // 데이터 로딩: selections 기반으로 words 합치기 + bookPools 만들기
   useEffect(() => {
@@ -404,13 +390,6 @@ export default function PracticeMCQ() {
       </StudentShell>
     );
   }
-
-  // 상단 우측 표시(현재 문제 book / chapter)
-  const currentMetaText = useMemo(() => {
-    const b = current?.book || '';
-    const ch = Number.isFinite(Number(current?.chapter)) ? `${current.chapter}강` : '';
-    return [b, ch].filter(Boolean).join(' | ');
-  }, [current?.book, current?.chapter]);
 
   return (
     <StudentShell>
