@@ -31,7 +31,6 @@ const styles = {
   speakerBtn: { border: '1px solid #ffd0e1', background: '#fff5f8', borderRadius: 12, padding: '8px 10px', cursor: 'pointer' },
   unlockBar: { background:'#fff0f5', border:'1px dashed #ff9fc0', padding:'10px 12px', borderRadius:12, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, marginBottom:12 },
   unlockBtn: { padding:'8px 12px', borderRadius:10, border:'1px solid #ff9fc0', background:'#ffeff6', fontWeight:700, cursor:'pointer' },
-  loadingCard: { border:'1px solid #ffd3e3', borderRadius:12, padding:16, background:'#fff', color:'#444' },
 };
 
 function useQuery() {
@@ -56,7 +55,7 @@ function SpeakerIcon({ size = 18 }) {
 
 /**
  * selections 정규화
- * - 다중 책: loc.state.selections = [{ book, chaptersText }]
+ * - 다중 책: loc.state.selections = [{ book, chaptersText }] (BookRangePage에서 넘어오는 형태)
  * - 레거시(단일): book + (chapters|start/end) 호환
  */
 function normalizeSelections({ locState, query }) {
@@ -80,25 +79,35 @@ function normalizeSelections({ locState, query }) {
 
   const rawSelections = ensureArray(locState?.selections);
 
+  // ✅ 다중 selections 우선
   if (rawSelections.length) {
     const normalized = rawSelections
       .map((s) => {
         const book = (s?.book || '').trim();
         if (!book) return null;
 
+        // BookRangePage는 chaptersText를 넘김
         const chaptersText = (s?.chaptersText ?? s?.chapters ?? '').toString().trim();
         const chapters = chaptersText ? parseChapterInput(chaptersText) : [];
 
         const start = Number(s?.start);
         const end = Number(s?.end);
 
-        return { book, chaptersText, chapters, start, end, raw: s };
+        return {
+          book,
+          chaptersText,
+          chapters,
+          start,
+          end,
+          raw: s,
+        };
       })
       .filter(Boolean);
 
     if (normalized.length) return { mode: 'multi', selections: normalized, legacy };
   }
 
+  // 레거시 단일
   if (!legacy.book) return { mode: 'none', selections: [], legacy };
   return {
     mode: 'single',
@@ -114,6 +123,7 @@ function normalizeSelections({ locState, query }) {
   };
 }
 
+// 표시용: 각 selection 요약 텍스트
 function selectionToText(sel, legacyRawChaptersParam = '') {
   const book = sel.book;
   const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
@@ -138,7 +148,7 @@ export default function PracticeMCQ() {
   }, [loc.state, loc.search]);
 
   const [phase, setPhase] = useState('play'); // 'play' | 'done'
-  const [words, setWords] = useState([]);     // 문제 단어들
+  const [words, setWords] = useState([]);     // 문제로 낼 단어들(합쳐진 배열)
   const [i, setI] = useState(0);
   const [opts, setOpts] = useState([]);
   const [ansIdx, setAnsIdx] = useState(-1);
@@ -146,17 +156,20 @@ export default function PracticeMCQ() {
   const [score, setScore] = useState(0);
   const [wrongs, setWrongs] = useState([]);
 
+  // ✅ 로딩 상태(단어 없어요 깜빡임 방지)
+  const [loading, setLoading] = useState(true);
+
+  // book별 보기 풀: { [book]: word[] }
   const [bookPools, setBookPools] = useState({});
 
-  // ✅ 깜빡임 제거용 로딩 상태
-  const [loadingWords, setLoadingWords] = useState(true);
-
+  // 🔊 모바일 오디오 unlock 상태
   const [soundEnabled, setSoundEnabled] = useState(() => {
     return localStorage.getItem('sound_enabled') === 'true';
   });
 
   const current = words[i];
 
+  // 상단 표시 텍스트(다중 책일 때)
   const headerText = useMemo(() => {
     if (mode === 'none') return '';
     const list = selections.map((s) => selectionToText(s, legacy._rawChaptersParam)).filter(Boolean);
@@ -164,13 +177,21 @@ export default function PracticeMCQ() {
     return `${list.length}권 선택: ${list.join(' / ')}`;
   }, [mode, selections, legacy._rawChaptersParam]);
 
-  // 데이터 로딩
+  // ✅ (중요) 훅은 조건부 return 아래로 내려가면 안됨
+  // currentMetaText는 가벼우니 useMemo 대신 그냥 계산(훅 안전)
+  const currentMetaText = (() => {
+    const b = current?.book || '';
+    const ch = Number.isFinite(Number(current?.chapter)) ? `${current.chapter}강` : '';
+    return [b, ch].filter(Boolean).join(' | ');
+  })();
+
+  // 데이터 로딩: selections 기반으로 words 합치기 + bookPools 만들기
   useEffect(() => {
     let mounted = true;
 
     (async () => {
       try {
-        setLoadingWords(true);
+        setLoading(true);
 
         if (mode === 'none' || !selections.length) {
           if (mounted) {
@@ -180,6 +201,7 @@ export default function PracticeMCQ() {
           return;
         }
 
+        // 1) selections별 문제 단어 로드 후 합치기
         const chunks = [];
         for (const sel of selections) {
           const book = sel.book;
@@ -187,11 +209,20 @@ export default function PracticeMCQ() {
           const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
           let range = [];
-          if (chapters.length > 0) range = await fetchWordsByChapters(book, chapters);
-          else if (hasRange) range = await fetchWordsInRange(book, sel.start, sel.end);
-          else range = [];
 
-          const withBook = (range || []).map((w) => ({ ...w, book: w.book || book }));
+          if (chapters.length > 0) {
+            range = await fetchWordsByChapters(book, chapters);
+          } else if (hasRange) {
+            range = await fetchWordsInRange(book, sel.start, sel.end);
+          } else {
+            range = [];
+          }
+
+          const withBook = (range || []).map((w) => ({
+            ...w,
+            book: w.book || book, // ✅ book 필드 보장
+          }));
+
           chunks.push(...withBook);
         }
 
@@ -204,6 +235,7 @@ export default function PracticeMCQ() {
         setWrongs([]);
         setPhase('play');
 
+        // 2) bookPools 로드 (각 book 전체 풀)
         const uniqueBooks = Array.from(new Set(selections.map((s) => s.book).filter(Boolean)));
         const poolMap = {};
 
@@ -219,6 +251,7 @@ export default function PracticeMCQ() {
           }
         }
 
+        // 풀 비었으면(로드 실패) 해당 book의 문제 range에서라도 풀백
         const byBookFromChunks = {};
         for (const w of (chunks || [])) {
           const b = w.book || '';
@@ -241,20 +274,23 @@ export default function PracticeMCQ() {
         setWords([]);
         setBookPools({});
       } finally {
-        if (mounted) setLoadingWords(false);
+        if (mounted) setLoading(false);
       }
     })();
 
     return () => { mounted = false; };
   }, [mode, selections, legacy._rawChaptersParam]);
 
-  // 보기 생성
+  // 보기 생성: "현재 문제의 book 풀"로 보기 만들기
   useEffect(() => {
     if (!current) return;
 
     const b = current?.book;
     const pool = (b && bookPools[b] && bookPools[b].length) ? bookPools[b] : [];
+
+    // pool이 비면 words 전체로라도 보기 생성(최후 폴백)
     const effectivePool = pool.length ? pool : words;
+
     if (!effectivePool || effectivePool.length === 0) return;
 
     const { options, answerIndex } = buildMCQOptions(current, effectivePool, words);
@@ -264,7 +300,7 @@ export default function PracticeMCQ() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [i, current?.id, current?.book, Object.keys(bookPools).length, words.length]);
 
-  // 자동 발음
+  // 문제 변경 시 자동 발음 (🔊 soundEnabled 일 때만)
   useEffect(() => {
     if (!current?.term_en) return;
     if (!soundEnabled) return;
@@ -272,6 +308,7 @@ export default function PracticeMCQ() {
     return () => speakCancel();
   }, [current?.id, soundEnabled]);
 
+  // 정오 저장: current.book 기준으로 기록
   async function record(action) {
     try {
       await supabase.from('study_logs').insert([
@@ -289,6 +326,7 @@ export default function PracticeMCQ() {
     }
   }
 
+  // 보기 클릭(발음 없음)
   async function choose(idx) {
     if (chosen >= 0 || phase !== 'play') return;
     setChosen(idx);
@@ -309,6 +347,7 @@ export default function PracticeMCQ() {
     setI((x) => x + 1);
   }
 
+  // 🔊 오디오 잠금 해제
   async function enableSoundOnce() {
     try {
       try { window.speechSynthesis?.resume?.(); } catch {}
@@ -334,6 +373,7 @@ export default function PracticeMCQ() {
     }
   }
 
+  // 잘못된 접근
   if (mode === 'none') {
     return (
       <StudentShell>
@@ -346,22 +386,20 @@ export default function PracticeMCQ() {
     );
   }
 
-  // ✅ 로딩 중에는 "단어 없음" 대신 로딩 카드
-  if (loadingWords) {
+  // ✅ 로딩 중(단어없음 깜빡임/크래시 방지)
+  if (loading) {
     return (
       <StudentShell>
         <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
           <div className="student-container">
-            <div className="student-card" style={styles.loadingCard}>
-              단어 불러오는 중…
-            </div>
+            <div className="student-card">불러오는 중…</div>
           </div>
         </div>
       </StudentShell>
     );
   }
 
-  // ✅ 로딩 끝났는데도 단어가 없을 때만 표시
+  // 단어 없음
   if (!words.length) {
     return (
       <StudentShell>
@@ -374,16 +412,11 @@ export default function PracticeMCQ() {
     );
   }
 
-  const currentMetaText = useMemo(() => {
-    const b = current?.book || '';
-    const ch = Number.isFinite(Number(current?.chapter)) ? `${current.chapter}강` : '';
-    return [b, ch].filter(Boolean).join(' | ');
-  }, [current?.book, current?.chapter]);
-
   return (
     <StudentShell>
       <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
         <div className="student-container">
+          {/* 🔊 소리 켜기(한번) 안내 바 */}
           {!soundEnabled && (
             <div className="student-card" style={styles.unlockBar} role="region" aria-label="소리 사용 안내">
               <div style={{fontSize:13, color:'#444'}}>
@@ -396,6 +429,7 @@ export default function PracticeMCQ() {
           )}
 
           <div className="student-card" style={{ marginTop: 12 }}>
+            {/* 진행 정보 */}
             <div style={{ display: 'flex', justifyContent: 'space-between', color:'#444', fontSize:13, gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
@@ -412,8 +446,10 @@ export default function PracticeMCQ() {
               </div>
             </div>
 
+            {/* 문제 카드 */}
             {phase === 'play' && (
               <div style={styles.card}>
+                {/* 영어 단어 + 스피커 버튼 */}
                 <div style={styles.termRow}>
                   <div style={styles.term}>{current?.term_en}</div>
                   <button
@@ -427,6 +463,7 @@ export default function PracticeMCQ() {
                   </button>
                 </div>
 
+                {/* 보기(뜻) */}
                 <div style={styles.btns}>
                   {opts.map((op, idx) => {
                     const picked = chosen === idx;
@@ -455,6 +492,7 @@ export default function PracticeMCQ() {
               </div>
             )}
 
+            {/* 종료 카드 */}
             {phase === 'done' && (
               <div style={styles.card}>
                 <div><b>연습 종료!</b> 점수: {score} / {words.length}</div>
