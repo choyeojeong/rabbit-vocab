@@ -580,13 +580,9 @@ export default function BookRangePage({ mode = "practice" }) {
                               const dateLabel = d ? dayjs(d).format("YYYY.MM.DD") : "";
                               const displayTitle = dateLabel ? `${baseName} ${dateLabel}` : baseName;
 
-                              // ✅ 원본 한 줄: "책 | 범위" (원본: 제거)
-                              const originLine = [
-                                (r.source_book || "").trim(),
-                                (r.source_chapters_text || "").trim(),
-                              ]
-                                .filter(Boolean)
-                                .join(" | ");
+                              // ✅ 줄바꿈: 책명 / 범위는 분리해서 표시
+                              const bookLine = (r.source_book || "").trim();
+                              const rangeLine = (r.source_chapters_text || "").trim();
 
                               return (
                                 <label
@@ -610,24 +606,41 @@ export default function BookRangePage({ mode = "practice" }) {
                                     style={{ marginTop: 3 }}
                                   />
                                   <div style={{ flex: 1, minWidth: 0 }}>
-                                    <div style={{ fontWeight: 900, color: COLORS.text }}>
-                                      {displayTitle}
-                                    </div>
+                                    <div style={{ fontWeight: 900, color: COLORS.text }}>{displayTitle}</div>
 
-                                    <div
-                                      style={{
-                                        fontSize: 12,
-                                        color: COLORS.sub,
-                                        marginTop: 4,
-                                        fontWeight: 800,
-                                        whiteSpace: "nowrap",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                      }}
-                                      title={originLine || ""}
-                                    >
-                                      {originLine || "—"}
-                                    </div>
+                                    {bookLine ? (
+                                      <div
+                                        style={{
+                                          fontSize: 12,
+                                          color: COLORS.sub,
+                                          marginTop: 4,
+                                          fontWeight: 800,
+                                          whiteSpace: "nowrap",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                        }}
+                                        title={bookLine}
+                                      >
+                                        {bookLine}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: 12, color: COLORS.sub, marginTop: 4, fontWeight: 800 }}>
+                                        —
+                                      </div>
+                                    )}
+
+                                    {rangeLine ? (
+                                      <div
+                                        style={{
+                                          fontSize: 12,
+                                          color: COLORS.sub,
+                                          fontWeight: 800,
+                                          marginTop: 2,
+                                        }}
+                                      >
+                                        {rangeLine}
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </label>
                               );
