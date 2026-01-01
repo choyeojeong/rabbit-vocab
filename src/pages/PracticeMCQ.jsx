@@ -54,11 +54,24 @@ function SpeakerIcon({ size = 18 }) {
 }
 
 /**
- * selections 정규화
- * - 다중 책: loc.state.selections = [{ book, chaptersText }] (BookRangePage에서 넘어오는 형태)
- * - 레거시(단일): book + (chapters|start/end) 호환
+ * ✅ 입력 정규화
+ * 1) 오답모드: loc.state.wrong_book_ids 존재 시
+ * 2) 정규모드: loc.state.selections 또는 레거시 단일
  */
-function normalizeSelections({ locState, query }) {
+function normalizeInput({ locState, query }) {
+  const wrongIds = ensureArray(locState?.wrong_book_ids).filter(Boolean);
+
+  // ✅ 오답 모드 우선
+  if (wrongIds.length) {
+    return {
+      mode: 'wrong',
+      wrong_book_ids: wrongIds,
+      selections: [],
+      legacy: { book: '', chapters: [], start: NaN, end: NaN, _rawChaptersParam: '' },
+    };
+  }
+
+  // ----- 기존(정규) 로직 -----
   const qBook = query.get('book') || '';
   const qChapters = query.get('chapters'); // "4-8,10,12"
   const qStart = query.get('start');
@@ -104,11 +117,11 @@ function normalizeSelections({ locState, query }) {
       })
       .filter(Boolean);
 
-    if (normalized.length) return { mode: 'multi', selections: normalized, legacy };
+    if (normalized.length) return { mode: 'multi', selections: normalized, legacy, wrong_book_ids: [] };
   }
 
   // 레거시 단일
-  if (!legacy.book) return { mode: 'none', selections: [], legacy };
+  if (!legacy.book) return { mode: 'none', selections: [], legacy, wrong_book_ids: [] };
   return {
     mode: 'single',
     selections: [{
@@ -119,7 +132,8 @@ function normalizeSelections({ locState, query }) {
       end: legacy.end,
       raw: null
     }],
-    legacy
+    legacy,
+    wrong_book_ids: []
   };
 }
 
@@ -135,6 +149,67 @@ function selectionToText(sel, legacyRawChaptersParam = '') {
   return `${book}`;
 }
 
+/**
+ * ✅ 오답 단어 로드
+ * - 1차: wrong_book_items에서 단어 정보를 직접 가져오려고 시도
+ * - 2차(폴백): wrong_book_items에 word_id만 있을 수도 있으니 vocab_words로 재조회
+ */
+async function fetchWrongWords(wrongBookIds) {
+  const ids = ensureArray(wrongBookIds).filter(Boolean);
+  if (!ids.length) return [];
+
+  // 1) wrong_book_items에서 가능한 컬럼을 최대한 뽑아본다
+  const { data: items, error: e1 } = await supabase
+    .from('wrong_book_items')
+    .select('wrong_book_id, word_id, term_en, meaning_ko, book, chapter, pos, accepted_ko')
+    .in('wrong_book_id', ids);
+
+  if (e1) {
+    console.warn('[wrong_book_items select fail]', e1);
+    return [];
+  }
+
+  const rows = items || [];
+
+  // 이미 term_en/meaning_ko가 들어있으면 그걸로 사용
+  const hasFull = rows.some(r => (r?.term_en && r?.meaning_ko));
+  if (hasFull) {
+    return rows
+      .map((r) => ({
+        id: r.word_id || r.id || null,
+        word_id: r.word_id || null,
+        term_en: r.term_en,
+        meaning_ko: r.meaning_ko,
+        book: r.book || '오답',
+        chapter: r.chapter ?? null,
+        pos: r.pos ?? null,
+        accepted_ko: r.accepted_ko ?? null,
+      }))
+      .filter(w => w.term_en && w.meaning_ko);
+  }
+
+  // 2) 폴백: word_id만 있다면 vocab_words에서 가져온다
+  const wordIds = Array.from(new Set(rows.map(r => r.word_id).filter(Boolean)));
+  if (!wordIds.length) return [];
+
+  // IN이 너무 길어질 수 있으니 chunk
+  const chunkSize = 200;
+  const out = [];
+  for (let i = 0; i < wordIds.length; i += chunkSize) {
+    const slice = wordIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('vocab_words')
+      .select('id, book, chapter, term_en, meaning_ko, pos, accepted_ko')
+      .in('id', slice);
+    if (error) {
+      console.warn('[vocab_words fallback fail]', error);
+      continue;
+    }
+    out.push(...(data || []));
+  }
+  return out.map(w => ({ ...w, word_id: w.id }));
+}
+
 export default function PracticeMCQ() {
   const nav = useNavigate();
   const loc = useLocation();
@@ -142,10 +217,15 @@ export default function PracticeMCQ() {
 
   const me = getSession();
 
-  const { mode, selections, legacy } = useMemo(() => {
-    return normalizeSelections({ locState: loc.state, query: q });
+  const input = useMemo(() => {
+    return normalizeInput({ locState: loc.state, query: q });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.state, loc.search]);
+
+  const mode = input.mode;
+  const selections = input.selections || [];
+  const legacy = input.legacy || {};
+  const wrongBookIds = input.wrong_book_ids || [];
 
   const [phase, setPhase] = useState('play'); // 'play' | 'done'
   const [words, setWords] = useState([]);     // 문제로 낼 단어들(합쳐진 배열)
@@ -169,23 +249,27 @@ export default function PracticeMCQ() {
 
   const current = words[i];
 
-  // 상단 표시 텍스트(다중 책일 때)
+  // 상단 표시 텍스트
   const headerText = useMemo(() => {
     if (mode === 'none') return '';
+    if (mode === 'wrong') return `오답 파일 ${wrongBookIds.length}개 선택`;
     const list = selections.map((s) => selectionToText(s, legacy._rawChaptersParam)).filter(Boolean);
     if (list.length <= 1) return list[0] || '';
     return `${list.length}권 선택: ${list.join(' / ')}`;
-  }, [mode, selections, legacy._rawChaptersParam]);
+  }, [mode, selections, legacy._rawChaptersParam, wrongBookIds.length]);
 
-  // ✅ (중요) 훅은 조건부 return 아래로 내려가면 안됨
-  // currentMetaText는 가벼우니 useMemo 대신 그냥 계산(훅 안전)
+  // 훅 안전: 가벼운 계산은 그냥
   const currentMetaText = (() => {
     const b = current?.book || '';
     const ch = Number.isFinite(Number(current?.chapter)) ? `${current.chapter}강` : '';
     return [b, ch].filter(Boolean).join(' | ');
   })();
 
-  // 데이터 로딩: selections 기반으로 words 합치기 + bookPools 만들기
+  /**
+   * ✅ 데이터 로딩
+   * - 오답 모드: wrong_book_items → words
+   * - 정규 모드: selections 기반 words + bookPools
+   */
   useEffect(() => {
     let mounted = true;
 
@@ -193,7 +277,8 @@ export default function PracticeMCQ() {
       try {
         setLoading(true);
 
-        if (mode === 'none' || !selections.length) {
+        // 0) 잘못된 접근
+        if (mode === 'none') {
           if (mounted) {
             setWords([]);
             setBookPools({});
@@ -201,7 +286,37 @@ export default function PracticeMCQ() {
           return;
         }
 
-        // 1) selections별 문제 단어 로드 후 합치기
+        // ✅ 1) 오답 모드
+        if (mode === 'wrong') {
+          const list = await fetchWrongWords(wrongBookIds);
+
+          if (!mounted) return;
+
+          const normalized = (list || []).map((w) => ({
+            ...w,
+            book: w.book || '오답',
+          }));
+
+          setWords(normalized);
+          setBookPools({});
+          setI(0);
+          setScore(0);
+          setChosen(-1);
+          setWrongs([]);
+          setPhase('play');
+          return;
+        }
+
+        // ✅ 2) 정규 모드(기존)
+        if (!selections.length) {
+          if (mounted) {
+            setWords([]);
+            setBookPools({});
+          }
+          return;
+        }
+
+        // 2-1) selections별 문제 단어 로드 후 합치기
         const chunks = [];
         for (const sel of selections) {
           const book = sel.book;
@@ -209,18 +324,12 @@ export default function PracticeMCQ() {
           const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
           let range = [];
-
-          if (chapters.length > 0) {
-            range = await fetchWordsByChapters(book, chapters);
-          } else if (hasRange) {
-            range = await fetchWordsInRange(book, sel.start, sel.end);
-          } else {
-            range = [];
-          }
+          if (chapters.length > 0) range = await fetchWordsByChapters(book, chapters);
+          else if (hasRange) range = await fetchWordsInRange(book, sel.start, sel.end);
 
           const withBook = (range || []).map((w) => ({
             ...w,
-            book: w.book || book, // ✅ book 필드 보장
+            book: w.book || book,
           }));
 
           chunks.push(...withBook);
@@ -235,7 +344,7 @@ export default function PracticeMCQ() {
         setWrongs([]);
         setPhase('play');
 
-        // 2) bookPools 로드 (각 book 전체 풀)
+        // 2-2) bookPools 로드 (각 book 전체 풀)
         const uniqueBooks = Array.from(new Set(selections.map((s) => s.book).filter(Boolean)));
         const poolMap = {};
 
@@ -279,18 +388,26 @@ export default function PracticeMCQ() {
     })();
 
     return () => { mounted = false; };
-  }, [mode, selections, legacy._rawChaptersParam]);
+  }, [mode, selections, legacy._rawChaptersParam, wrongBookIds]);
 
-  // 보기 생성: "현재 문제의 book 풀"로 보기 만들기
+  // 보기 생성
   useEffect(() => {
     if (!current) return;
 
+    // ✅ 오답 모드: words 전체를 풀로 사용
+    if (mode === 'wrong') {
+      if (!words || words.length === 0) return;
+      const { options, answerIndex } = buildMCQOptions(current, words, words);
+      setOpts(options);
+      setAnsIdx(answerIndex);
+      setChosen(-1);
+      return;
+    }
+
+    // 정규 모드: 현재 문제의 book 풀로 보기 만들기
     const b = current?.book;
     const pool = (b && bookPools[b] && bookPools[b].length) ? bookPools[b] : [];
-
-    // pool이 비면 words 전체로라도 보기 생성(최후 폴백)
     const effectivePool = pool.length ? pool : words;
-
     if (!effectivePool || effectivePool.length === 0) return;
 
     const { options, answerIndex } = buildMCQOptions(current, effectivePool, words);
@@ -298,9 +415,9 @@ export default function PracticeMCQ() {
     setAnsIdx(answerIndex);
     setChosen(-1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [i, current?.id, current?.book, Object.keys(bookPools).length, words.length]);
+  }, [mode, i, current?.id, current?.book, Object.keys(bookPools).length, words.length]);
 
-  // 문제 변경 시 자동 발음 (🔊 soundEnabled 일 때만)
+  // 문제 변경 시 자동 발음
   useEffect(() => {
     if (!current?.term_en) return;
     if (!soundEnabled) return;
@@ -308,25 +425,11 @@ export default function PracticeMCQ() {
     return () => speakCancel();
   }, [current?.id, soundEnabled]);
 
-  // 정오 저장: current.book 기준으로 기록
+  // ✅ 연습/오답연습은 DB 기록(오답 저장)하지 않음
   async function record(action) {
-    try {
-      await supabase.from('study_logs').insert([
-        {
-          student_id: me?.id,
-          book: current?.book || selections?.[0]?.book || legacy.book || null,
-          chapter: current?.chapter ?? null,
-          word_id: current?.id ?? null,
-          action,
-          payload: { mode: 'mcq' },
-        },
-      ]);
-    } catch (e) {
-      console.warn('log fail', e);
-    }
+    return;
   }
 
-  // 보기 클릭(발음 없음)
   async function choose(idx) {
     if (chosen >= 0 || phase !== 'play') return;
     setChosen(idx);
@@ -335,6 +438,7 @@ export default function PracticeMCQ() {
     if (correct) setScore((s) => s + 1);
     else setWrongs((w) => [...w, { word: current, your: opts[idx], correct: opts[ansIdx] }]);
 
+    // ✅ 기록 안 함
     await record(correct ? 'got_right' : 'got_wrong');
   }
 
@@ -386,7 +490,7 @@ export default function PracticeMCQ() {
     );
   }
 
-  // ✅ 로딩 중(단어없음 깜빡임/크래시 방지)
+  // 로딩 중
   if (loading) {
     return (
       <StudentShell>
@@ -405,7 +509,11 @@ export default function PracticeMCQ() {
       <StudentShell>
         <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
           <div className="student-container">
-            <div className="student-card">선택한 범위에 단어가 없어요.</div>
+            <div className="student-card">
+              {mode === 'wrong'
+                ? '선택한 오답 파일에 단어가 없어요.'
+                : '선택한 범위에 단어가 없어요.'}
+            </div>
           </div>
         </div>
       </StudentShell>
@@ -433,7 +541,7 @@ export default function PracticeMCQ() {
             <div style={{ display: 'flex', justifyContent: 'space-between', color:'#444', fontSize:13, gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                  {headerText || selectionToText(selections[0], legacy._rawChaptersParam)}
+                  {headerText || (selections[0] ? selectionToText(selections[0], legacy._rawChaptersParam) : '')}
                 </div>
                 {currentMetaText && (
                   <div style={{ fontSize:12, color:'#777', marginTop:2 }}>

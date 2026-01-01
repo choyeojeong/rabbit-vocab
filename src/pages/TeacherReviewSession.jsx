@@ -34,7 +34,7 @@ export default function TeacherReviewSession() {
         const { data: sess, error: e1 } = await supabase
           .from("test_sessions")
           .select(
-            "id, student_name, book, chapters_text, chapter_start, chapter_end, num_questions, cutoff_miss, created_at, status"
+            "id, student_id, student_name, book, chapters_text, chapter_start, chapter_end, num_questions, cutoff_miss, created_at, status"
           )
           .eq("id", sessionId)
           .maybeSingle();
@@ -49,7 +49,7 @@ export default function TeacherReviewSession() {
         const { data: its, error: e2 } = await supabase
           .from("test_items")
           .select(
-            "id, order_index, term_en, meaning_ko, student_answer, auto_ok, final_ok"
+            "id, order_index, term_en, meaning_ko, student_answer, auto_ok, final_ok, word_id"
           )
           .eq("session_id", sessionId)
           .order("order_index", { ascending: true });
@@ -115,7 +115,16 @@ export default function TeacherReviewSession() {
     }
   }
 
-  // 최종확정: ① 문항 final_ok 저장 → ② 세션 finalize RPC(레거시 시그니처)
+  // ✅ (추가) 오답파일 생성 RPC 호출
+  async function createWrongBook(sessionId) {
+    const { data, error } = await supabase.rpc("create_wrong_book_from_session", {
+      p_session_id: sessionId,
+    });
+    if (error) throw error;
+    return data; // wrong_books.id (uuid) 반환
+  }
+
+  // 최종확정: ① 문항 final_ok 저장 → ② 세션 finalize RPC → ③ 오답파일 생성 RPC
   async function finalize() {
     try {
       setSaving(true);
@@ -164,6 +173,24 @@ export default function TeacherReviewSession() {
           "최종 확정 중 오류가 발생했습니다.";
         setError(msg);
         return;
+      }
+
+      // 프론트 상태도 finalized로 갱신 (사용자 혼란 방지)
+      setSession((prev) => (prev ? { ...prev, status: "finalized" } : prev));
+
+      // ④ ✅ 오답파일 생성 (실패 시: 확정은 완료됐으니 재시도 안내)
+      try {
+        await createWrongBook(sessionId);
+      } catch (e) {
+        console.error("[create_wrong_book_from_session error]", e);
+        const msg =
+          e?.details ||
+          e?.message ||
+          "오답 파일 생성 중 오류가 발생했습니다.";
+        setError(
+          `※ 최종 확정은 완료됐지만, 오답 파일 생성이 실패했어요.\n${msg}\n(페이지에서 다시 '최종 확정'을 눌러 재시도할 수 있어요.)`
+        );
+        return; // ✅ 여기서 멈춰서 재시도 가능하게
       }
 
       // 완료 이동
@@ -219,21 +246,25 @@ export default function TeacherReviewSession() {
 
         {/* 일괄 버튼 */}
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 16 }}>
-          <button className="btn-pink" onClick={setFromAuto} disabled={items.length === 0}>
+          <button className="btn-pink" onClick={setFromAuto} disabled={items.length === 0 || saving}>
             자동채점값으로 초기화
           </button>
-          <button className="btn-pink" onClick={() => setAll(true)} disabled={items.length === 0}>
+          <button className="btn-pink" onClick={() => setAll(true)} disabled={items.length === 0 || saving}>
             모두 정답 처리
           </button>
-          <button className="btn-pink" onClick={() => setAll(false)} disabled={items.length === 0}>
+          <button className="btn-pink" onClick={() => setAll(false)} disabled={items.length === 0 || saving}>
             모두 오답 처리
           </button>
           <button className="btn-pink" onClick={finalize} disabled={saving || items.length === 0}>
-            최종 확정
+            {saving ? "처리 중…" : "최종 확정"}
           </button>
         </div>
 
-        {error && <div style={{ marginTop: 12, color: "#d00" }}>{error}</div>}
+        {error && (
+          <div style={{ marginTop: 12, color: "#d00", whiteSpace: "pre-line" }}>
+            {error}
+          </div>
+        )}
 
         {/* 문항 리스트 */}
         <div style={{ marginTop: 20 }}>
@@ -256,12 +287,15 @@ export default function TeacherReviewSession() {
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                  <div style={{ fontWeight: 700 }}>{i + 1}. {it.term_en}</div>
+                  <div style={{ fontWeight: 700 }}>
+                    {i + 1}. {it.term_en}
+                  </div>
                   <label style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                     <input
                       type="checkbox"
                       checked={!!it.final_ok}
                       onChange={() => toggleItem(it.id)}
+                      disabled={saving}
                     />
                     최종 정답
                   </label>

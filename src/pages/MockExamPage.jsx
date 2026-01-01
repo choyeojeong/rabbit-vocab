@@ -33,11 +33,24 @@ function useQuery() {
 }
 
 /**
- * selections 정규화
- * - 다중: loc.state.selections = [{ book, chaptersText }]  (BookRangePage에서 넘어오는 형태)
- * - 레거시 단일: book + chapters/start/end 지원
+ * ✅ 입력 정규화
+ * 1) 오답모드: loc.state.wrong_book_ids 존재 시
+ * 2) 정규모드: loc.state.selections 또는 레거시 단일
  */
-function normalizeSelections({ locState, query }) {
+function normalizeInput({ locState, query }) {
+  const wrongIds = ensureArray(locState?.wrong_book_ids).filter(Boolean);
+
+  // ✅ 오답 모드 우선
+  if (wrongIds.length) {
+    return {
+      mode: 'wrong',
+      wrong_book_ids: wrongIds,
+      selections: [],
+      legacy: { book: '', chapters: [], start: NaN, end: NaN, _rawChaptersParam: '' },
+    };
+  }
+
+  // ----- 기존(정규) 로직 -----
   const qBook = query.get('book') || '';
   const qChapters = query.get('chapters'); // "4-8,10,12"
   const qStart = query.get('start');
@@ -77,10 +90,10 @@ function normalizeSelections({ locState, query }) {
       })
       .filter(Boolean);
 
-    if (normalized.length) return { mode: 'multi', selections: normalized, legacy };
+    if (normalized.length) return { mode: 'multi', selections: normalized, legacy, wrong_book_ids: [] };
   }
 
-  if (!legacy.book) return { mode: 'none', selections: [], legacy };
+  if (!legacy.book) return { mode: 'none', selections: [], legacy, wrong_book_ids: [] };
   return {
     mode: 'single',
     selections: [{
@@ -91,7 +104,8 @@ function normalizeSelections({ locState, query }) {
       end: legacy.end,
       raw: null
     }],
-    legacy
+    legacy,
+    wrong_book_ids: []
   };
 }
 
@@ -100,11 +114,68 @@ function selectionToText(sel, legacyRawChaptersParam = '') {
   const chapters = ensureArray(sel.chapters).filter((n) => Number.isFinite(Number(n))).map(Number);
   const hasRange = Number.isFinite(sel.start) && Number.isFinite(sel.end);
 
-  // ✅ 다중책은 chaptersText를 그대로 보여주는 게 사용자가 입력한 범위와 일치
   if (chapters.length) return `${book} (${sel.chaptersText || chapters.join(', ')})`;
   if (legacyRawChaptersParam && !chapters.length) return `${book} (${legacyRawChaptersParam})`;
   if (hasRange) return `${book} (${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)}강)`;
   return `${book}`;
+}
+
+/**
+ * ✅ 오답 단어 로드
+ * - 1차: wrong_book_items에서 단어 정보를 직접 가져오려고 시도
+ * - 2차(폴백): wrong_book_items에 word_id만 있을 수도 있으니 vocab_words로 재조회
+ */
+async function fetchWrongWords(wrongBookIds) {
+  const ids = ensureArray(wrongBookIds).filter(Boolean);
+  if (!ids.length) return [];
+
+  const { data: items, error: e1 } = await supabase
+    .from('wrong_book_items')
+    .select('wrong_book_id, word_id, term_en, meaning_ko, book, chapter, pos, accepted_ko')
+    .in('wrong_book_id', ids);
+
+  if (e1) {
+    console.warn('[wrong_book_items select fail]', e1);
+    return [];
+  }
+
+  const rows = items || [];
+
+  const hasFull = rows.some(r => (r?.term_en && r?.meaning_ko));
+  if (hasFull) {
+    return rows
+      .map((r) => ({
+        id: r.word_id || r.id || null,
+        word_id: r.word_id || null,
+        term_en: r.term_en,
+        meaning_ko: r.meaning_ko,
+        book: r.book || '오답',
+        chapter: r.chapter ?? null,
+        pos: r.pos ?? null,
+        accepted_ko: r.accepted_ko ?? null,
+      }))
+      .filter(w => w.term_en && w.meaning_ko);
+  }
+
+  const wordIds = Array.from(new Set(rows.map(r => r.word_id).filter(Boolean)));
+  if (!wordIds.length) return [];
+
+  const chunkSize = 200;
+  const out = [];
+  for (let i = 0; i < wordIds.length; i += chunkSize) {
+    const slice = wordIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('vocab_words')
+      .select('id, book, chapter, term_en, meaning_ko, pos, accepted_ko')
+      .in('id', slice);
+    if (error) {
+      console.warn('[vocab_words fallback fail]', error);
+      continue;
+    }
+    out.push(...(data || []));
+  }
+
+  return out.map(w => ({ ...w, word_id: w.id }));
 }
 
 export default function MockExamPage() {
@@ -114,16 +185,21 @@ export default function MockExamPage() {
 
   const me = getSession();
 
-  const { mode, selections, legacy } = useMemo(() => {
-    return normalizeSelections({ locState: loc.state, query: q });
+  const input = useMemo(() => {
+    return normalizeInput({ locState: loc.state, query: q });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.state, loc.search]);
+
+  const mode = input.mode;
+  const selections = input.selections || [];
+  const legacy = input.legacy || {};
+  const wrongBookIds = input.wrong_book_ids || [];
 
   // 설정 단계
   const [numQ, setNumQ] = useState(30);
   const [cutMiss, setCutMiss] = useState(3);
 
-  // 로드된 전체 단어(다중 책 합친 결과)
+  // 로드된 전체 단어
   const [words, setWords] = useState([]);
 
   const [phase, setPhase] = useState('config'); // config | exam | done
@@ -148,22 +224,44 @@ export default function MockExamPage() {
   // 상단 표시 텍스트
   const headerText = useMemo(() => {
     if (mode === 'none') return '';
+    if (mode === 'wrong') return `오답 파일 ${wrongBookIds.length}개 선택`;
     const list = selections.map((s) => selectionToText(s, legacy._rawChaptersParam)).filter(Boolean);
     if (list.length <= 1) return list[0] || '';
     return `${list.length}권 선택: ${list.join(' / ')}`;
-  }, [mode, selections, legacy._rawChaptersParam]);
+  }, [mode, selections, legacy._rawChaptersParam, wrongBookIds.length]);
 
   useEffect(() => {
     answerRef.current = answer;
   }, [answer]);
 
-  // 단어 로드: selections를 모두 불러서 합친다
+  // ✅ 단어 로드: 오답모드 or 정규모드
   useEffect(() => {
     let mounted = true;
 
     (async () => {
       try {
-        if (mode === 'none' || !selections.length) {
+        // 잘못된 접근
+        if (mode === 'none') {
+          if (mounted) setWords([]);
+          return;
+        }
+
+        // ✅ 오답 모드
+        if (mode === 'wrong') {
+          const list = await fetchWrongWords(wrongBookIds);
+          if (!mounted) return;
+
+          const normalized = (list || []).map((w) => ({
+            ...w,
+            book: w.book || '오답',
+          }));
+
+          setWords(normalized);
+          return;
+        }
+
+        // ✅ 정규 모드
+        if (!selections.length) {
           if (mounted) setWords([]);
           return;
         }
@@ -190,7 +288,6 @@ export default function MockExamPage() {
 
         if (!mounted) return;
         setWords(chunks || []);
-        // config 화면에 있을 때만 상태 강제 초기화는 하지 않음(사용자 설정 유지)
       } catch (e) {
         console.error('MockExamPage: load failed', e);
         if (!mounted) return;
@@ -199,11 +296,13 @@ export default function MockExamPage() {
     })();
 
     return () => { mounted = false; };
-  }, [mode, selections, legacy._rawChaptersParam]);
+  }, [mode, selections, legacy._rawChaptersParam, wrongBookIds]);
 
   // 시험 시작
   function startExam() {
-    if (!words.length) return alert('선택한 범위에 단어가 없습니다.');
+    if (!words.length) {
+      return alert(mode === 'wrong' ? '선택한 오답 파일에 단어가 없습니다.' : '선택한 범위에 단어가 없습니다.');
+    }
 
     const n = Math.max(1, Math.min(Number(numQ) || 0, 999));
     const c = Math.max(0, Math.min(Number(cutMiss) || 0, 999));
@@ -254,22 +353,9 @@ export default function MockExamPage() {
     // eslint-disable-next-line
   }, [phase, i]);
 
+  // ✅ 연습/모의는 오답 저장(로그 저장) 자체를 안 함
   async function log(action, word) {
-    try {
-      await supabase.from('study_logs').insert([
-        {
-          student_id: me?.id,
-          // ✅ 다중책: 문항의 book 기준으로 기록
-          book: word?.book || selections?.[0]?.book || legacy.book || null,
-          chapter: word?.chapter ?? null,
-          word_id: word?.id ?? null,
-          action,
-          payload: { mode: 'mock' },
-        },
-      ]);
-    } catch (e) {
-      console.warn('log fail', e);
-    }
+    return;
   }
 
   function submitCurrent(forcedAnswer) {
@@ -291,6 +377,7 @@ export default function MockExamPage() {
     } else {
       log('got_wrong', word);
     }
+
     setResults((arr) => [...arr, { word, your, ok }]);
     setAnswer('');
     answerRef.current = '';
@@ -321,7 +408,7 @@ export default function MockExamPage() {
     );
   }
 
-  // 상단 현재 문항 메타(다중책에서 유용)
+  // 상단 현재 문항 메타
   const currentMetaText = useMemo(() => {
     const w = seq[i];
     if (!w) return '';
@@ -338,7 +425,7 @@ export default function MockExamPage() {
             {/* 상단 간략 정보 */}
             <div style={{ color:'#444', marginBottom: 6, fontSize:13 }}>
               <div style={{ whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-                {headerText || selectionToText(selections[0], legacy._rawChaptersParam)}
+                {headerText || (selections[0] ? selectionToText(selections[0], legacy._rawChaptersParam) : '')}
               </div>
               {phase === 'exam' && currentMetaText && (
                 <div style={{ fontSize:12, color:'#777', marginTop:2 }}>
@@ -376,6 +463,7 @@ export default function MockExamPage() {
                     />
                   </div>
                 </div>
+
                 <div style={{ marginTop: 12 }}>
                   <button className="btn" style={styles.btn} onClick={startExam}>시작하기</button>
                 </div>

@@ -112,6 +112,14 @@ export default function Dashboard() {
                     CSV 관리
                   </button>
 
+                  {/* ✅ 추가: 오답노트(학생별) */}
+                  <button
+                    className="student-button"
+                    onClick={() => navigate("/admin/wrongs")}
+                  >
+                    오답노트(학생별)
+                  </button>
+
                   {/* ✅ 단어책 분류(신규) */}
                   <button
                     className="student-button"
@@ -128,7 +136,7 @@ export default function Dashboard() {
                 </div>
 
                 <div className="student-text" style={{ color: "#777", marginTop: 12 }}>
-                  관리자 모드에서는 학생관리/검수/모니터/CSV/단어책 분류 페이지로 바로 이동할 수 있어요.
+                  관리자 모드에서는 학생관리/검수/모니터/CSV/오답노트/단어책 분류 페이지로 바로 이동할 수 있어요.
                 </div>
               </>
             ) : (

@@ -29,11 +29,22 @@ function useQuery() {
 }
 
 /**
- * selections 정규화
- * - 다중: loc.state.selections = [{ book, chaptersText }]  ✅(현재 BookRangePage 형태)
- * - 레거시 단일: book + chapters/start/end 지원
+ * ✅ 입력 정규화
+ * 1) 오답모드: loc.state.wrong_book_ids 존재 시 최우선
+ * 2) 정규모드: loc.state.selections 또는 레거시 단일
  */
-function normalizeSelections({ locState, query }) {
+function normalizeInput({ locState, query }) {
+  const wrongIds = ensureArray(locState?.wrong_book_ids).filter(Boolean);
+  if (wrongIds.length) {
+    return {
+      mode: 'wrong',
+      wrong_book_ids: wrongIds,
+      selections: [],
+      legacy: { book: '', chapters: [], start: NaN, end: NaN, _rawChaptersParam: '' },
+    };
+  }
+
+  // ----- 기존(정규) 로직 -----
   const qBook = query.get('book') || '';
   const qChapters = query.get('chapters'); // "4-6,8,10"
   const qStart = query.get('start');
@@ -83,10 +94,10 @@ function normalizeSelections({ locState, query }) {
       })
       .filter(Boolean);
 
-    if (normalized.length) return { mode: 'multi', selections: normalized, legacy };
+    if (normalized.length) return { mode: 'multi', selections: normalized, legacy, wrong_book_ids: [] };
   }
 
-  if (!legacy.book) return { mode: 'none', selections: [], legacy };
+  if (!legacy.book) return { mode: 'none', selections: [], legacy, wrong_book_ids: [] };
 
   return {
     mode: 'single',
@@ -98,7 +109,8 @@ function normalizeSelections({ locState, query }) {
       end: legacy.end,
       raw: null
     }],
-    legacy
+    legacy,
+    wrong_book_ids: []
   };
 }
 
@@ -114,6 +126,64 @@ function selectionToText(sel, legacyRawChaptersParam = '') {
   return `${book}`;
 }
 
+/**
+ * ✅ 오답 단어 로드
+ * - 1차: wrong_book_items에서 단어 정보를 직접 가져오려고 시도
+ * - 2차(폴백): wrong_book_items에 word_id만 있을 수도 있으니 vocab_words로 재조회
+ */
+async function fetchWrongWords(wrongBookIds) {
+  const ids = ensureArray(wrongBookIds).filter(Boolean);
+  if (!ids.length) return [];
+
+  const { data: items, error: e1 } = await supabase
+    .from('wrong_book_items')
+    .select('wrong_book_id, word_id, term_en, meaning_ko, book, chapter, pos, accepted_ko')
+    .in('wrong_book_id', ids);
+
+  if (e1) {
+    console.warn('[wrong_book_items select fail]', e1);
+    return [];
+  }
+
+  const rows = items || [];
+  const hasFull = rows.some(r => (r?.term_en && r?.meaning_ko));
+
+  if (hasFull) {
+    return rows
+      .map((r) => ({
+        id: r.word_id || r.id || null,
+        word_id: r.word_id || null,
+        term_en: r.term_en,
+        meaning_ko: r.meaning_ko,
+        book: r.book || '오답',
+        chapter: r.chapter ?? null,
+        pos: r.pos ?? null,
+        accepted_ko: r.accepted_ko ?? null,
+      }))
+      .filter(w => w.term_en && w.meaning_ko);
+  }
+
+  const wordIds = Array.from(new Set(rows.map(r => r.word_id).filter(Boolean)));
+  if (!wordIds.length) return [];
+
+  const chunkSize = 200;
+  const out = [];
+  for (let i = 0; i < wordIds.length; i += chunkSize) {
+    const slice = wordIds.slice(i, i + chunkSize);
+    const { data, error } = await supabase
+      .from('vocab_words')
+      .select('id, book, chapter, term_en, meaning_ko, pos, accepted_ko')
+      .in('id', slice);
+    if (error) {
+      console.warn('[vocab_words fallback fail]', error);
+      continue;
+    }
+    out.push(...(data || []));
+  }
+
+  return out.map(w => ({ ...w, word_id: w.id }));
+}
+
 export default function OfficialExamPage() {
   const nav = useNavigate();
   const loc = useLocation();
@@ -121,10 +191,15 @@ export default function OfficialExamPage() {
 
   const me = getSession();
 
-  const { mode, selections, legacy } = useMemo(() => {
-    return normalizeSelections({ locState: loc.state, query: q });
+  const input = useMemo(() => {
+    return normalizeInput({ locState: loc.state, query: q });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.state, loc.search]);
+
+  const mode = input.mode;
+  const selections = input.selections || [];
+  const legacy = input.legacy || {};
+  const wrongBookIds = input.wrong_book_ids || [];
 
   // 로그인/세션 가드
   useEffect(() => {
@@ -137,7 +212,7 @@ export default function OfficialExamPage() {
   // 설정
   const [numQ, setNumQ] = useState(30);
   const [cutMiss, setCutMiss] = useState(3);
-  const [words, setWords] = useState([]); // 다중 책 합친 문제 풀
+  const [words, setWords] = useState([]); // 문제 풀(정규: 다중 책 합침 / 오답: 오답파일 합침)
   const [phase, setPhase] = useState('config'); // config | exam | submitted
 
   // 진행
@@ -164,20 +239,41 @@ export default function OfficialExamPage() {
   // 상단 표시 텍스트
   const headerText = useMemo(() => {
     if (mode === 'none') return '';
+    if (mode === 'wrong') return `오답 파일 ${wrongBookIds.length}개 선택`;
     const list = selections.map((s) => selectionToText(s, legacy._rawChaptersParam)).filter(Boolean);
     if (list.length <= 1) return list[0] || '';
     return `${list.length}권 선택: ${list.join(' / ')}`;
-  }, [mode, selections, legacy._rawChaptersParam]);
+  }, [mode, selections, legacy._rawChaptersParam, wrongBookIds.length]);
 
   useEffect(() => { answerRef.current = answer; }, [answer]);
 
-  // ✅ 다중 책 단어 로드 (각 selection 범위에서 불러와 합침)
+  // ✅ 단어 로드: 오답모드 or 정규모드
   useEffect(() => {
     let mounted = true;
 
     (async () => {
       try {
-        if (mode === 'none' || !selections.length) {
+        if (mode === 'none') {
+          if (mounted) setWords([]);
+          return;
+        }
+
+        // ✅ 오답 모드
+        if (mode === 'wrong') {
+          const list = await fetchWrongWords(wrongBookIds);
+          if (!mounted) return;
+
+          const normalized = (list || []).map((w) => ({
+            ...w,
+            book: w.book || '오답',
+          }));
+
+          setWords(normalized);
+          return;
+        }
+
+        // ✅ 정규 모드
+        if (!selections.length) {
           if (mounted) setWords([]);
           return;
         }
@@ -210,7 +306,7 @@ export default function OfficialExamPage() {
     })();
 
     return () => { mounted = false; };
-  }, [mode, selections, legacy._rawChaptersParam]);
+  }, [mode, selections, legacy._rawChaptersParam, wrongBookIds]);
 
   // 포커스 이탈 감지 훅 (기존 로컬 알림/가드 유지)
   useExamFocusGuard({
@@ -239,7 +335,6 @@ export default function OfficialExamPage() {
         event_type: eventType,
         detail: {
           ...detail,
-          // ✅ 다중책: 현재 문항 book 기록
           book: curWord?.book || null,
           at_question: (i + 1) || null,
           total_questions: seq?.length || null,
@@ -275,8 +370,13 @@ export default function OfficialExamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, sessionId, i, (seq?.length || 0), profileMeta?.name, profileMeta?.teacher_name]);
 
-  // ✅ 다중책용: chapters_text 생성 (책별 범위를 문자열로 저장)
-  function computeChaptersTextFromSelections() {
+  // ✅ chapters_text 생성
+  function computeChaptersText() {
+    if (mode === 'wrong') {
+      const ids = ensureArray(wrongBookIds).filter(Boolean);
+      return `WRONG:${ids.join(',')}`;
+    }
+
     const parts = (selections || [])
       .map((sel) => {
         const book = (sel?.book || '').trim();
@@ -306,7 +406,7 @@ export default function OfficialExamPage() {
     return parts.join(' | ');
   }
 
-  // ✅ 세션 테이블 호환을 위해 chapter_start/end는 "전체 선택 범위의 최소~최대(챕터)"로 저장
+  // ✅ chapter_start/end: 전체 words에서 최소~최대로 저장(호환용)
   function computeGlobalChapterBoundsFromWords() {
     const chs = (words || [])
       .map((w) => Number(w?.chapter))
@@ -321,7 +421,7 @@ export default function OfficialExamPage() {
       return nav('/');
     }
     if (mode === 'none') return alert('잘못된 접근입니다. (범위 정보 없음)');
-    if (!words.length) return alert('선택한 범위에 단어가 없습니다.');
+    if (!words.length) return alert(mode === 'wrong' ? '선택한 오답 파일에 단어가 없습니다.' : '선택한 범위에 단어가 없습니다.');
 
     // 입력 유효화
     const n = Math.max(1, Math.min(Number(numQ) || 0, words.length));
@@ -334,7 +434,7 @@ export default function OfficialExamPage() {
     let bounds, chaptersText;
     try {
       bounds = computeGlobalChapterBoundsFromWords();
-      chaptersText = computeChaptersTextFromSelections();
+      chaptersText = computeChaptersText();
       if (!chaptersText) throw new Error('챕터 표기 생성 실패');
     } catch (e) {
       return alert(e.message || '범위 계산 중 오류');
@@ -362,8 +462,8 @@ export default function OfficialExamPage() {
         student_id: me?.id,
         student_name: profileName,
         teacher_name: profileTeacher,
-        // ✅ 대표 book(첫 선택) - 기존 컬럼 호환
-        book: selections?.[0]?.book || legacy.book || null,
+        // ✅ 대표 book(정규=첫 선택, 오답=오답)
+        book: (mode === 'wrong') ? '오답' : (selections?.[0]?.book || legacy.book || null),
         chapters_text: chaptersText,
         chapter_start: bounds.chapter_start,
         chapter_end: bounds.chapter_end,
@@ -437,12 +537,15 @@ export default function OfficialExamPage() {
       await supabase.from('study_logs').insert([
         {
           student_id: me?.id,
-          // ✅ 다중책: 문항의 book 기준으로 기록
-          book: word?.book || selections?.[0]?.book || legacy.book || null,
+          book: word?.book || (mode === 'wrong' ? '오답' : (selections?.[0]?.book || legacy.book)) || null,
           chapter: word?.chapter ?? null,
-          word_id: word?.id ?? null,
+          word_id: word?.id ?? word?.word_id ?? null,
           action,
-          payload: { mode: 'official' },
+          payload: {
+            mode: 'official',
+            source: mode === 'wrong' ? 'wrong' : 'regular',
+            wrong_book_ids: mode === 'wrong' ? wrongBookIds : null,
+          },
         },
       ]);
     } catch {
@@ -488,7 +591,7 @@ export default function OfficialExamPage() {
     if (!sid) {
       try {
         const bounds = computeGlobalChapterBoundsFromWords();
-        const chaptersText = computeChaptersTextFromSelections();
+        const chaptersText = computeChaptersText();
 
         let profileName = '', profileTeacher = null;
         try {
@@ -511,7 +614,7 @@ export default function OfficialExamPage() {
             student_id: me?.id,
             student_name: profileName,
             teacher_name: profileTeacher,
-            book: selections?.[0]?.book || legacy.book || null,
+            book: (mode === 'wrong') ? '오답' : (selections?.[0]?.book || legacy.book || null),
             chapters_text: chaptersText,
             chapter_start: bounds.chapter_start,
             chapter_end: bounds.chapter_end,
@@ -564,7 +667,7 @@ export default function OfficialExamPage() {
         session_id: sid,
         order_index: idx + 1,
         question_type: 'subjective',
-        word_id: r?.word?.id ?? null,
+        word_id: r?.word?.id ?? r?.word?.word_id ?? null,
         term_en: r?.word?.term_en ?? '',
         meaning_ko: r?.word?.meaning_ko ?? '',
         student_answer: r?.your ?? '',
@@ -598,12 +701,13 @@ export default function OfficialExamPage() {
   }
 
   // config 화면 표시용: 현재 선택 요약
-  const rangeTextForConfig =
-    headerText ||
-    selectionToText(
-      selections?.[0] || { book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, chaptersText: legacy._rawChaptersParam },
-      legacy._rawChaptersParam
-    );
+  const rangeTextForConfig = headerText ||
+    (mode === 'wrong'
+      ? `오답 파일 ${wrongBookIds.length}개 선택`
+      : selectionToText(
+          selections?.[0] || { book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, chaptersText: legacy._rawChaptersParam },
+          legacy._rawChaptersParam
+        ));
 
   // exam 화면 표시용: 현재 문항 book/chapter
   const currentMetaText = useMemo(() => {

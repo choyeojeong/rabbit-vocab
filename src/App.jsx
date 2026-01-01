@@ -1,7 +1,6 @@
 // src/App.jsx
-import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 // 공개
 import LoginPage from "./pages/LoginPage";
@@ -35,6 +34,9 @@ import AdminGate from "./pages/admin/AdminGate";
 // ✅ 단어책 분류(신규)
 import BookCategoryManagePage from "./pages/admin/BookCategoryManagePage";
 import BookCategorizePage from "./pages/admin/BookCategorizePage";
+
+// ✅ (추가) 관리자 오답노트(학생별/월별) 페이지
+import WrongBooksAdminPage from "./pages/admin/WrongBooksAdminPage";
 
 // 학생 보호
 import { ensureLiveStudent, getSession } from "./utils/session";
@@ -108,7 +110,7 @@ function ProtectedDashboard({ children }) {
 }
 
 /* =========================
-   ✅ 구버전 단수 경로(/result/:id) → /results/:id 로 정확히 치환 리다이렉트
+   ✅ 구버전 단수 경로(/result/:id) → /results/:id 로 리다이렉트
 ========================= */
 function LegacyOfficialResultRedirect() {
   const { id } = useParams();
@@ -117,8 +119,6 @@ function LegacyOfficialResultRedirect() {
 
 /* =========================
    ✅ 로그인 유지용 리다이렉트
-   - 이미 role이 있으면 "/" 또는 "/login" 접근 시 /dashboard로 이동
-   - (LoginPage에도 동일 로직이 있지만, 여기서도 한 번 더 안전하게 막아줌)
 ========================= */
 function LoginGate({ children }) {
   const navigate = useNavigate();
@@ -157,7 +157,6 @@ export default function App() {
             </LoginGate>
           }
         />
-        {/* ✅ alias */}
         <Route path="/register" element={<RegisterPage />} />
 
         {/* 대시보드 */}
@@ -229,7 +228,7 @@ export default function App() {
           }
         />
 
-        {/* ✅ 구버전 단수 경로도 안전하게 살려두기 */}
+        {/* ✅ 구버전 단수 경로도 살려두기 */}
         <Route
           path="/exam/official/result/:id"
           element={<LegacyOfficialResultRedirect />}
@@ -246,16 +245,32 @@ export default function App() {
           <Route path="/teacher/csv" element={<CsvManagePage />} />
           <Route path="/teacher/csv/batches" element={<CsvBatchListPage />} />
 
+          {/* ✅ (추가) 오답노트(관리자) */}
+          <Route path="/teacher/wrongs" element={<WrongBooksAdminPage />} />
+          <Route path="/admin/wrongs" element={<WrongBooksAdminPage />} />
+
           {/* ✅ 단어책 분류(신규) */}
-          <Route path="/teacher/book-categories" element={<BookCategoryManagePage />} />
-          <Route path="/teacher/book-categorize" element={<BookCategorizePage />} />
+          <Route
+            path="/teacher/book-categories"
+            element={<BookCategoryManagePage />}
+          />
+          <Route
+            path="/teacher/book-categorize"
+            element={<BookCategorizePage />}
+          />
 
           {/* admin alias */}
           <Route path="/admin/users" element={<TeacherManagePage />} />
           <Route path="/admin/csv" element={<CsvManagePage />} />
           <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
-          <Route path="/admin/book-categories" element={<BookCategoryManagePage />} />
-          <Route path="/admin/book-categorize" element={<BookCategorizePage />} />
+          <Route
+            path="/admin/book-categories"
+            element={<BookCategoryManagePage />}
+          />
+          <Route
+            path="/admin/book-categorize"
+            element={<BookCategorizePage />}
+          />
         </Route>
 
         {/* fallback */}
