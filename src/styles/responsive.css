@@ -3,15 +3,18 @@
   --bg-student: #fff5f8; /* 연핑크 배경 */
   --bg-teacher: #f7f9fc;
   --fg-primary: #ff6fa3;
-  --shadow-soft: 0 10px 30px rgba(0,0,0,0.06);
+  --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.06);
 }
 
 /* ===== 리셋 & 뷰포트/배경 꽉 채우기 ===== */
 *,
 *::before,
-*::after { box-sizing: border-box; }
+*::after {
+  box-sizing: border-box;
+}
 
-html, body {
+html,
+body {
   height: 100%;
   margin: 0;
   padding: 0;
@@ -22,16 +25,22 @@ body {
   color: #222;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  overflow-x: hidden;           /* 우측 하단 여백/가로스크롤 방지 */
+  overflow-x: hidden; /* 우측 하단 여백/가로스크롤 방지 */
 }
 
 /* 주소창 높이 변화 대응: 100svh 우선, 폴백으로 100dvh/100vh */
-.vh-100 { min-height: 100svh; }
+.vh-100 {
+  min-height: 100svh;
+}
 @supports not (min-height: 100svh) {
-  .vh-100 { min-height: 100dvh; }
+  .vh-100 {
+    min-height: 100dvh;
+  }
 }
 @supports not (min-height: 100dvh) {
-  .vh-100 { min-height: 100vh; }
+  .vh-100 {
+    min-height: 100vh;
+  }
 }
 
 /* iOS 하단 홈 인디케이터 여백 */
@@ -47,14 +56,22 @@ body {
   min-height: 100dvh;
 }
 
-.student-page { background: var(--bg-student); }
-.teacher-page { background: var(--bg-teacher); }
+.student-page {
+  background: var(--bg-student);
+}
+.teacher-page {
+  background: var(--bg-teacher);
+}
 
 /* 화면 중앙 정렬 유틸 (세로/가로 모두) */
 .centered {
   display: flex;
   align-items: center;
   justify-content: center;
+
+  /* ✅ centered가 "카드폭"을 만들지 못하게 안전장치 */
+  width: 100%;
+  max-width: 100%;
 }
 
 /* 스크롤 있는 페이지에서 카드만 가운데 정렬하고 싶을 때 */
@@ -62,22 +79,38 @@ body {
   display: flex;
   justify-content: center;
   align-items: flex-start;
+
+  /* ✅ 얘도 동일하게 폭 제한 방지 */
+  width: 100%;
+  max-width: 100%;
 }
 
 /* ===== 학생용(모바일 우선) ===== */
+/* ✅ 기존: max-width: 440px 때문에 항상 가운데로 좁아졌음
+   ✅ 변경: 기본은 "풀폭" (StudentShell이 풀폭 컨테이너로 쓰는 구조에 맞춤)
+   - 카드처럼 좁히고 싶을 때는 별도 클래스(.student-container-narrow)로 선택 적용 */
 .student-container {
   width: 100%;
-  max-width: 440px;   /* 살짝 더 컴팩트하게 */
-  margin: 0 auto;
+  max-width: 100%;
+  margin: 0;
   padding: 16px;
 }
 
-.student-card {
+/* ✅ 혹시 페이지에서 vh-100 + centered를 쓰면서 안쪽에 student-container를 또 넣는 경우가 있음
+   이 조합에서도 무조건 풀폭 되도록 강제 */
+.centered .student-container,
+.centered-top .student-container {
   width: 100%;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: var(--shadow-soft);
-  padding: 18px;
+  max-width: 100%;
+  margin: 0;
+}
+
+/* ✅ "가운데 카드"가 필요한 옛 페이지/특정 화면만 선택적으로 쓰는 좁은 컨테이너 */
+.student-container-narrow {
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 16px;
 }
 
 /* 타이틀/자잘한 요소들 예쁜 기본값 */
@@ -114,18 +147,38 @@ body {
   box-shadow: 0 6px 18px rgba(255, 111, 163, 0.25);
 }
 
-.student-button:active { transform: translateY(1px); }
+.student-button:active {
+  transform: translateY(1px);
+}
 
 /* 카드 간격 */
-.stack > * + * { margin-top: 12px; }
+.stack > * + * {
+  margin-top: 12px;
+}
 
 /* ===== 반응형 보정 ===== */
 @media (min-width: 480px) {
-  .student-card { padding: 20px; }
-  .student-title { font-size: 24px; }
+  .student-card {
+    padding: 20px;
+  }
+  .student-title {
+    font-size: 24px;
+  }
 }
 
 @media (min-width: 768px) {
-  .student-container { max-width: 520px; }
-  .student-card { padding: 24px; }
+  /* ✅ 이제 student-container는 기본 풀폭이므로, 여기서도 풀폭 유지
+     (특정 화면에서 좁게 쓰려면 .student-container-narrow를 사용) */
+  .student-container {
+    max-width: 100%;
+  }
+
+  /* 좁은 컨테이너는 데스크탑에서만 조금 더 넓게 */
+  .student-container-narrow {
+    max-width: 520px;
+  }
+
+  .student-card {
+    padding: 24px;
+  }
 }
