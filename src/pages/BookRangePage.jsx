@@ -23,17 +23,35 @@ const COLORS = {
   danger: "#b00020",
 };
 
-// ✅ 기존 pageCard를 "풀폭 패널"로 사용 (가운데 네모 만드는 클래스(student-card) 제거)
-const pageCard = {
-  background: COLORS.card,
+/**
+ * ✅ 핵심 변경점
+ * - pageCard(흰 네모 박스) 제거 → "풀스크린 + 중앙 정렬 컨테이너"로 변경
+ * - 내부 섹션 박스도 흰색(#fff) 최소화 (pinkSoft 기반)
+ */
+const pageWrap = {
+  minHeight: "100dvh",
+  width: "100%",
+  display: "flex",
+  alignItems: "center", // ✅ 세로 중앙
+  justifyContent: "center",
+  paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
+  paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+  paddingLeft: 16,
+  paddingRight: 16,
+  background: COLORS.bg, // ✅ 화면 전체 배경
+  color: COLORS.text,
+};
+
+const content = {
+  width: "100%",
+  maxWidth: 820, // 너무 넓게 퍼지지 않게(원하면 1100까지 올려도 됨)
+};
+
+const panel = {
   border: `1px solid ${COLORS.border}`,
   borderRadius: 14,
-  padding: 16,
-  color: COLORS.text,
-  boxShadow: "0 10px 30px rgba(255,111,163,.10)",
-  width: "100%",
-  maxWidth: "100%",
-  margin: 0,
+  padding: 14,
+  background: COLORS.pinkSoft, // ✅ 흰색 제거
 };
 
 const tabBtn = {
@@ -42,7 +60,7 @@ const tabBtn = {
   borderRadius: 12,
   fontWeight: 900,
   cursor: "pointer",
-  background: "#fff",
+  background: "transparent",
   color: COLORS.pink,
   border: `1px solid ${COLORS.border}`,
 };
@@ -55,20 +73,18 @@ const fieldStyle = {
   fontSize: 14,
   outline: "none",
   color: COLORS.text,
-  background: "#fff",
+  background: "rgba(255,255,255,0.65)", // ✅ 완전 흰색 대신 살짝 투명
   fontWeight: 800,
-  boxShadow: "0 8px 18px rgba(31,42,68,0.06)",
 };
 
 const miniBtn = {
   padding: "8px 10px",
   borderRadius: 10,
   border: `1px solid ${COLORS.border}`,
-  background: "#fff",
+  background: "rgba(255,255,255,0.65)",
   color: COLORS.text,
   fontWeight: 900,
   cursor: "pointer",
-  boxShadow: "0 8px 18px rgba(31,42,68,0.06)",
 };
 
 const primaryBtn = {
@@ -87,37 +103,31 @@ const outlinePinkBtn = {
   width: "100%",
   padding: "14px 16px",
   borderRadius: 14,
-  background: "#fff",
+  background: "transparent",
   color: COLORS.pink,
   border: `2px solid ${COLORS.pink2}`,
   fontWeight: 900,
   cursor: "pointer",
-  boxShadow: "0 12px 24px rgba(31,42,68,0.08)",
 };
 
 export default function BookRangePage({ mode = "practice" }) {
   const nav = useNavigate();
   const isOfficial = mode === "official";
 
-  /* =========================
-     탭: 정규(기존) / 오답(신규)
-  ========================= */
+  /* 탭 */
   const [tab, setTab] = useState("regular"); // 'regular' | 'wrong'
 
-  /* =========================
-     상태(기존)
-  ========================= */
+  /* 상태(기존) */
   const [bookMeta, setBookMeta] = useState([]); // { book, category_id, category_path }
   const [catNodes, setCatNodes] = useState([]);
 
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
-  const [catSearch, setCatSearch] = useState("");
   const [expanded, setExpanded] = useState(() => new Set());
 
-  // ✅ 맨 상단: 단어책 검색(추가)
+  // 단어책 검색
   const [bookSearch, setBookSearch] = useState("");
 
-  // ⭐ 여러 책 선택 + 책별 챕터
+  // 여러 책 선택 + 책별 챕터
   const [selectedBooks, setSelectedBooks] = useState(() => new Set());
   const [chaptersByBook, setChaptersByBook] = useState({}); // book -> chapterInput
   const [chapterOptions, setChapterOptions] = useState({}); // book -> [chapters]
@@ -127,9 +137,7 @@ export default function BookRangePage({ mode = "practice" }) {
 
   const reloadingRef = useRef(false);
 
-  /* =========================
-     ✅ 오답(신규)
-  ========================= */
+  /* ✅ 오답(신규) */
   const me = useMemo(() => {
     const s = getSession?.();
     return { id: s?.id || null, name: (s?.name || "").trim() };
@@ -168,14 +176,12 @@ export default function BookRangePage({ mode = "practice" }) {
     }
   }
 
-  // 탭이 '오답'으로 바뀌면 목록 로드
   useEffect(() => {
     if (tab !== "wrong") return;
     loadWrongBooks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // yyyy_mm로 그룹핑
   const wrongByMonth = useMemo(() => {
     const map = new Map(); // yyyy_mm -> rows[]
     for (const r of wrongRows) {
@@ -183,7 +189,6 @@ export default function BookRangePage({ mode = "practice" }) {
       if (!map.has(key)) map.set(key, []);
       map.get(key).push(r);
     }
-    // 월 내 정렬(최근 우선)
     for (const [k, arr] of map.entries()) {
       arr.sort((a, b) => {
         const ad = a.exam_date ? new Date(a.exam_date).getTime() : 0;
@@ -193,7 +198,6 @@ export default function BookRangePage({ mode = "practice" }) {
       });
       map.set(k, arr);
     }
-    // 키 정렬(최근 월 우선: "YYYY-MM")
     const keys = Array.from(map.keys()).sort((a, b) => (b || "").localeCompare(a || ""));
     return keys.map((k) => ({ month: k, rows: map.get(k) }));
   }, [wrongRows]);
@@ -206,7 +210,6 @@ export default function BookRangePage({ mode = "practice" }) {
     });
   }
 
-  // ✅ 월 전체 선택/해제
   function isMonthAllSelected(rows) {
     if (!rows?.length) return false;
     for (const r of rows) {
@@ -220,11 +223,8 @@ export default function BookRangePage({ mode = "practice" }) {
     setSelectedWrongBookIds((prev) => {
       const next = new Set(prev);
       const allOn = rows.every((r) => next.has(r.id));
-      if (allOn) {
-        rows.forEach((r) => next.delete(r.id));
-      } else {
-        rows.forEach((r) => next.add(r.id));
-      }
+      if (allOn) rows.forEach((r) => next.delete(r.id));
+      else rows.forEach((r) => next.add(r.id));
       return next;
     });
   }
@@ -233,7 +233,6 @@ export default function BookRangePage({ mode = "practice" }) {
     setSelectedWrongBookIds(new Set());
   }
 
-  // ✅ 오답 시험보기 (mode별로 같은 state 전달)
   function goWrong(path) {
     const ids = Array.from(selectedWrongBookIds);
     if (!ids.length) {
@@ -243,9 +242,7 @@ export default function BookRangePage({ mode = "practice" }) {
     nav(path, { state: { mode, wrong_book_ids: ids } });
   }
 
-  /* =========================
-     분류 트리 유틸(기존)
-  ========================= */
+  /* 분류 트리 유틸 */
   const tree = useMemo(() => {
     const byId = new Map(catNodes.map((n) => [n.id, n]));
     const childrenBy = new Map();
@@ -279,9 +276,6 @@ export default function BookRangePage({ mode = "practice" }) {
     return { byId, getChildren, isLeaf, buildPath };
   }, [catNodes]);
 
-  /* =========================
-     데이터 로드(기존)
-  ========================= */
   async function reloadAll() {
     if (reloadingRef.current) return;
     reloadingRef.current = true;
@@ -314,9 +308,6 @@ export default function BookRangePage({ mode = "practice" }) {
     reloadAll();
   }, []);
 
-  /* =========================
-     분류 선택(기존)
-  ========================= */
   function toggleExpand(id) {
     setExpanded((prev) => {
       const n = new Set(prev);
@@ -333,17 +324,11 @@ export default function BookRangePage({ mode = "practice" }) {
     setSelectedCategoryId((p) => (p === id ? "" : id));
   }
 
-  /* =========================
-     분류별 책 목록(기존)
-  ========================= */
   const booksInCategory = useMemo(() => {
     if (!selectedCategoryId) return [];
     return bookMeta.filter((b) => b.category_id === selectedCategoryId);
   }, [bookMeta, selectedCategoryId]);
 
-  /* =========================
-     ✅ 맨 상단 검색 결과(기존)
-  ========================= */
   const searchedBooks = useMemo(() => {
     const q = (bookSearch || "").trim().toLowerCase();
     if (!q) return [];
@@ -363,9 +348,6 @@ export default function BookRangePage({ mode = "practice" }) {
     return out.slice(0, 30);
   }, [bookSearch, bookMeta]);
 
-  /* =========================
-     ✅ 선택한 책 목록용(기존)
-  ========================= */
   const selectedBookList = useMemo(() => {
     const arr = Array.from(selectedBooks);
     arr.sort((a, b) => (a || "").localeCompare(b || ""));
@@ -376,9 +358,6 @@ export default function BookRangePage({ mode = "practice" }) {
     if (selectedBooks.has(book)) toggleBook(book);
   }
 
-  /* =========================
-     책 선택 / 해제(기존)
-  ========================= */
   async function toggleBook(book) {
     setSelectedBooks((prev) => {
       const next = new Set(prev);
@@ -387,7 +366,6 @@ export default function BookRangePage({ mode = "practice" }) {
       return next;
     });
 
-    // 처음 선택 시 챕터 로드
     if (!chapterOptions[book]) {
       const cs = await fetchChapters(book);
       setChapterOptions((m) => ({ ...m, [book]: cs }));
@@ -400,9 +378,6 @@ export default function BookRangePage({ mode = "practice" }) {
     }
   }
 
-  /* =========================
-     이동 (A안) (기존)
-  ========================= */
   function buildSelections() {
     const selections = [];
 
@@ -434,9 +409,6 @@ export default function BookRangePage({ mode = "practice" }) {
     nav(path, { state: { mode, selections } });
   }
 
-  /* =========================
-     트리 렌더 (기존)
-  ========================= */
   function renderTree(parentId = null) {
     const nodes = tree.getChildren(parentId);
     if (!nodes.length) return null;
@@ -456,7 +428,7 @@ export default function BookRangePage({ mode = "practice" }) {
                   padding: "8px 10px",
                   borderRadius: 12,
                   border: `1px solid ${COLORS.border}`,
-                  background: on ? COLORS.pink : "#fff",
+                  background: on ? COLORS.pink : "rgba(255,255,255,0.55)",
                   color: on ? "#fff" : COLORS.text,
                   cursor: "pointer",
                   fontWeight: 900,
@@ -475,278 +447,420 @@ export default function BookRangePage({ mode = "practice" }) {
 
   return (
     <StudentShell>
-      {/* ✅ ✅ 풀스크린: student-card 제거 + panel(pageCard)만 사용 */}
-      <div style={pageCard}>
-        {/* 탭 버튼 */}
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            type="button"
-            onClick={() => setTab("regular")}
-            style={{
-              ...tabBtn,
-              background: tab === "regular" ? COLORS.pink : "#fff",
-              color: tab === "regular" ? "#fff" : COLORS.pink,
-              border: tab === "regular" ? `1px solid ${COLORS.pink}` : `1px solid ${COLORS.border}`,
-            }}
-          >
-            정규
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("wrong")}
-            style={{
-              ...tabBtn,
-              background: tab === "wrong" ? COLORS.pink : "#fff",
-              color: tab === "wrong" ? "#fff" : COLORS.pink,
-              border: tab === "wrong" ? `1px solid ${COLORS.pink}` : `1px solid ${COLORS.border}`,
-            }}
-          >
-            오답
-          </button>
-        </div>
-
-        {/* =========================
-            오답 탭 UI
-        ========================= */}
-        {tab === "wrong" ? (
-          <>
-            <div style={{ marginTop: 12, fontWeight: 900, color: COLORS.text }}>
-              {me?.name ? `${me.name}님의 오답 파일` : "내 오답 파일"}
-            </div>
-
-            {wrongErr && (
-              <div style={{ color: COLORS.danger, marginTop: 8, fontWeight: 900 }}>{wrongErr}</div>
-            )}
-
-            <div
+      {/* ✅ 풀스크린 + 중앙 정렬 + 흰 네모 박스 제거 */}
+      <div style={pageWrap}>
+        <div style={content}>
+          {/* 탭 */}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => setTab("regular")}
               style={{
-                marginTop: 10,
-                border: `1px solid ${COLORS.border}`,
-                borderRadius: 14,
-                padding: 12,
-                background: "#fff",
-                color: COLORS.text,
+                ...tabBtn,
+                background: tab === "regular" ? COLORS.pink : "transparent",
+                color: tab === "regular" ? "#fff" : COLORS.pink,
+                border:
+                  tab === "regular"
+                    ? `1px solid ${COLORS.pink}`
+                    : `1px solid ${COLORS.border}`,
               }}
             >
-              {wrongLoading ? (
-                <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div>
-              ) : wrongByMonth.length === 0 ? (
-                <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
-                  아직 오답 파일이 없어요. (공식시험 확정 후 자동 생성됩니다.)
+              정규
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab("wrong")}
+              style={{
+                ...tabBtn,
+                background: tab === "wrong" ? COLORS.pink : "transparent",
+                color: tab === "wrong" ? "#fff" : COLORS.pink,
+                border:
+                  tab === "wrong"
+                    ? `1px solid ${COLORS.pink}`
+                    : `1px solid ${COLORS.border}`,
+              }}
+            >
+              오답
+            </button>
+          </div>
+
+          {tab === "wrong" ? (
+            <>
+              <div style={{ marginTop: 12, fontWeight: 900, color: COLORS.text }}>
+                {me?.name ? `${me.name}님의 오답 파일` : "내 오답 파일"}
+              </div>
+
+              {wrongErr && (
+                <div style={{ color: COLORS.danger, marginTop: 8, fontWeight: 900 }}>
+                  {wrongErr}
                 </div>
-              ) : (
-                <div style={{ display: "grid", gap: 14 }}>
-                  {wrongByMonth.map(({ month, rows }) => {
-                    const monthAll = isMonthAllSelected(rows);
-                    const monthCount = rows?.length || 0;
+              )}
 
-                    return (
-                      <div key={month}>
-                        {/* 월 헤더 + 월 전체선택 */}
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 10,
-                            marginBottom: 8,
-                          }}
-                        >
-                          <div style={{ fontWeight: 900, color: COLORS.text }}>
-                            📁 {month}{" "}
-                            <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
-                              ({monthCount}개)
-                            </span>
-                          </div>
+              {/* ✅ 기존 흰 박스 → pinkSoft 패널로 */}
+              <div style={{ ...panel, marginTop: 10 }}>
+                {wrongLoading ? (
+                  <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
+                    불러오는 중…
+                  </div>
+                ) : wrongByMonth.length === 0 ? (
+                  <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
+                    아직 오답 파일이 없어요. (공식시험 확정 후 자동 생성됩니다.)
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 14 }}>
+                    {wrongByMonth.map(({ month, rows }) => {
+                      const monthAll = isMonthAllSelected(rows);
+                      const monthCount = rows?.length || 0;
 
-                          <button
-                            type="button"
-                            onClick={() => toggleMonthAll(rows)}
+                      return (
+                        <div key={month}>
+                          <div
                             style={{
-                              ...miniBtn,
-                              border: monthAll ? `1px solid ${COLORS.pink}` : `1px solid ${COLORS.border}`,
-                              color: monthAll ? COLORS.pink : COLORS.text,
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              gap: 10,
+                              marginBottom: 8,
                             }}
-                            disabled={!monthCount}
-                            title="이 달의 파일을 한 번에 선택/해제"
                           >
-                            {monthAll ? "월 전체 해제" : "월 전체 선택"}
-                          </button>
-                        </div>
-
-                        <div style={{ display: "grid", gap: 8 }}>
-                          {rows.map((r) => {
-                            const checked = selectedWrongBookIds.has(r.id);
-
-                            // ✅ 표시용 파일명: "학생명 YYYY.MM.DD"
-                            const baseName = (me?.name || "").trim() || "나";
-                            const d = r.exam_date || r.created_at;
-                            const dateLabel = d ? dayjs(d).format("YYYY.MM.DD") : "";
-                            const displayTitle = dateLabel ? `${baseName} ${dateLabel}` : baseName;
-
-                            // ✅ 줄바꿈: 책명 / 범위는 분리해서 표시
-                            const bookLine = (r.source_book || "").trim();
-                            const rangeLine = (r.source_chapters_text || "").trim();
-
-                            return (
-                              <label
-                                key={r.id}
+                            <div style={{ fontWeight: 900, color: COLORS.text }}>
+                              📁 {month}{" "}
+                              <span
                                 style={{
-                                  border: `1px solid ${COLORS.border2}`,
-                                  borderRadius: 12,
-                                  padding: 10,
-                                  background: checked ? COLORS.pinkSoft : "#fff",
-                                  cursor: "pointer",
-                                  display: "flex",
-                                  gap: 10,
-                                  alignItems: "flex-start",
-                                  color: COLORS.text,
+                                  fontSize: 12,
+                                  color: COLORS.sub,
+                                  fontWeight: 800,
                                 }}
                               >
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => toggleWrong(r.id)}
-                                  style={{ marginTop: 3 }}
-                                />
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontWeight: 900, color: COLORS.text }}>{displayTitle}</div>
+                                ({monthCount}개)
+                              </span>
+                            </div>
 
-                                  {bookLine ? (
-                                    <div
-                                      style={{
-                                        fontSize: 12,
-                                        color: COLORS.sub,
-                                        marginTop: 4,
-                                        fontWeight: 800,
-                                        whiteSpace: "nowrap",
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                      }}
-                                      title={bookLine}
-                                    >
-                                      {bookLine}
-                                    </div>
-                                  ) : (
-                                    <div style={{ fontSize: 12, color: COLORS.sub, marginTop: 4, fontWeight: 800 }}>
-                                      —
-                                    </div>
-                                  )}
+                            <button
+                              type="button"
+                              onClick={() => toggleMonthAll(rows)}
+                              style={{
+                                ...miniBtn,
+                                border: monthAll
+                                  ? `1px solid ${COLORS.pink}`
+                                  : `1px solid ${COLORS.border}`,
+                                color: monthAll ? COLORS.pink : COLORS.text,
+                              }}
+                              disabled={!monthCount}
+                              title="이 달의 파일을 한 번에 선택/해제"
+                            >
+                              {monthAll ? "월 전체 해제" : "월 전체 선택"}
+                            </button>
+                          </div>
 
-                                  {rangeLine ? (
-                                    <div
-                                      style={{
-                                        fontSize: 12,
-                                        color: COLORS.sub,
-                                        fontWeight: 800,
-                                        marginTop: 2,
-                                      }}
-                                    >
-                                      {rangeLine}
+                          <div style={{ display: "grid", gap: 8 }}>
+                            {rows.map((r) => {
+                              const checked = selectedWrongBookIds.has(r.id);
+
+                              const baseName = (me?.name || "").trim() || "나";
+                              const d = r.exam_date || r.created_at;
+                              const dateLabel = d ? dayjs(d).format("YYYY.MM.DD") : "";
+                              const displayTitle = dateLabel ? `${baseName} ${dateLabel}` : baseName;
+
+                              const bookLine = (r.source_book || "").trim();
+                              const rangeLine = (r.source_chapters_text || "").trim();
+
+                              return (
+                                <label
+                                  key={r.id}
+                                  style={{
+                                    border: `1px solid ${COLORS.border2}`,
+                                    borderRadius: 12,
+                                    padding: 10,
+                                    background: checked
+                                      ? "rgba(255,255,255,0.75)"
+                                      : "rgba(255,255,255,0.45)",
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    gap: 10,
+                                    alignItems: "flex-start",
+                                    color: COLORS.text,
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleWrong(r.id)}
+                                    style={{ marginTop: 3 }}
+                                  />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontWeight: 900, color: COLORS.text }}>
+                                      {displayTitle}
                                     </div>
-                                  ) : null}
-                                </div>
-                              </label>
-                            );
-                          })}
+
+                                    {bookLine ? (
+                                      <div
+                                        style={{
+                                          fontSize: 12,
+                                          color: COLORS.sub,
+                                          marginTop: 4,
+                                          fontWeight: 800,
+                                          whiteSpace: "nowrap",
+                                          overflow: "hidden",
+                                          textOverflow: "ellipsis",
+                                        }}
+                                        title={bookLine}
+                                      >
+                                        {bookLine}
+                                      </div>
+                                    ) : (
+                                      <div
+                                        style={{
+                                          fontSize: 12,
+                                          color: COLORS.sub,
+                                          marginTop: 4,
+                                          fontWeight: 800,
+                                        }}
+                                      >
+                                        —
+                                      </div>
+                                    )}
+
+                                    {rangeLine ? (
+                                      <div
+                                        style={{
+                                          fontSize: 12,
+                                          color: COLORS.sub,
+                                          fontWeight: 800,
+                                          marginTop: 2,
+                                        }}
+                                      >
+                                        {rangeLine}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </label>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button type="button" onClick={loadWrongBooks} style={miniBtn} disabled={wrongLoading}>
+                    새로고침
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearWrongSelection}
+                    style={miniBtn}
+                    disabled={selectedWrongBookIds.size === 0}
+                  >
+                    선택 해제
+                  </button>
                 </div>
-              )}
 
-              <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button type="button" onClick={loadWrongBooks} style={miniBtn} disabled={wrongLoading}>
-                  새로고침
-                </button>
-                <button
-                  type="button"
-                  onClick={clearWrongSelection}
-                  style={miniBtn}
-                  disabled={selectedWrongBookIds.size === 0}
-                >
-                  선택 해제
-                </button>
+                <div style={{ marginTop: 10, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
+                  * 월 전체선택도 되고, 파일별로도 선택할 수 있어요.
+                </div>
               </div>
 
-              <div style={{ marginTop: 10, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
-                * 월 전체선택도 되고, 파일별로도 선택할 수 있어요.
+              <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+                {isOfficial ? (
+                  <button type="button" onClick={() => goWrong("/exam/official")} style={primaryBtn}>
+                    오답 시험보기(공식)
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => goWrong("/practice/mcq")} style={primaryBtn}>
+                      오답 시험보기 → 객관식
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => goWrong("/practice/mock")}
+                      style={outlinePinkBtn}
+                    >
+                      오답 시험보기 → 모의시험
+                    </button>
+                  </>
+                )}
               </div>
-            </div>
+            </>
+          ) : (
+            <>
+              {err && <div style={{ color: COLORS.danger, fontWeight: 900 }}>{err}</div>}
 
-            {/* ✅✅ 오답 시작 버튼들: mode에 따라 분기 (official이면 "공식"만) */}
-            <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
-              {isOfficial ? (
-                <button type="button" onClick={() => goWrong("/exam/official")} style={primaryBtn}>
-                  오답 시험보기(공식)
-                </button>
-              ) : (
+              {/* 단어책 검색 */}
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontWeight: 900, marginBottom: 6, color: COLORS.text }}>
+                  단어책 검색
+                </div>
+                <input
+                  style={fieldStyle}
+                  value={bookSearch}
+                  onChange={(e) => setBookSearch(e.target.value)}
+                  placeholder="책 이름을 입력하세요 (예: 워드마스터)"
+                />
+
+                {bookSearch.trim() && (
+                  <div style={{ ...panel, marginTop: 8 }}>
+                    {loading ? (
+                      <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
+                        불러오는 중…
+                      </div>
+                    ) : searchedBooks.length === 0 ? (
+                      <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
+                        검색 결과가 없어요.
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {searchedBooks.map((book) => {
+                          const checked = selectedBooks.has(book);
+                          return (
+                            <div
+                              key={book}
+                              style={{
+                                border: `1px solid ${COLORS.border2}`,
+                                borderRadius: 12,
+                                padding: 10,
+                                background: checked
+                                  ? "rgba(255,255,255,0.75)"
+                                  : "rgba(255,255,255,0.45)",
+                                color: COLORS.text,
+                              }}
+                            >
+                              <label style={{ fontWeight: 900, cursor: "pointer", color: COLORS.text }}>
+                                <input type="checkbox" checked={checked} onChange={() => toggleBook(book)} />{" "}
+                                {book}
+                              </label>
+
+                              {checked && (
+                                <input
+                                  style={{ ...fieldStyle, marginTop: 8 }}
+                                  value={chaptersByBook[book] || ""}
+                                  onChange={(e) =>
+                                    setChaptersByBook((m) => ({
+                                      ...m,
+                                      [book]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="예: 4-8, 10"
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: 8, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
+                      * 여기서 체크한 책도 아래 “선택한 책 목록”에 자동 반영돼요.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 분류 선택 */}
+              <h3 style={{ marginTop: 16, color: COLORS.text }}>분류 선택</h3>
+              <div style={{ ...panel, maxHeight: 260, overflow: "auto" }}>
+                {loading ? (
+                  <div style={{ color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div>
+                ) : (
+                  renderTree(null)
+                )}
+              </div>
+
+              {selectedCategoryId && (
                 <>
-                  <button type="button" onClick={() => goWrong("/practice/mcq")} style={primaryBtn}>
-                    오답 시험보기 → 객관식
-                  </button>
-                  <button type="button" onClick={() => goWrong("/practice/mock")} style={outlinePinkBtn}>
-                    오답 시험보기 → 모의시험
-                  </button>
-                </>
-              )}
-            </div>
-          </>
-        ) : (
-          /* =========================
-              정규 탭 UI
-          ========================= */
-          <>
-            {err && <div style={{ color: COLORS.danger, fontWeight: 900 }}>{err}</div>}
+                  <h3 style={{ marginTop: 16, color: COLORS.text }}>책 선택 + 챕터 범위</h3>
 
-            {/* 단어책 검색 */}
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 900, marginBottom: 6, color: COLORS.text }}>단어책 검색</div>
-              <input
-                style={fieldStyle}
-                value={bookSearch}
-                onChange={(e) => setBookSearch(e.target.value)}
-                placeholder="책 이름을 입력하세요 (예: 워드마스터)"
-              />
+                  <div style={panel}>
+                    {booksInCategory.map((b) => {
+                      const checked = selectedBooks.has(b.book);
+                      return (
+                        <div key={b.book} style={{ marginTop: 10 }}>
+                          <label style={{ fontWeight: 900, color: COLORS.text }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleBook(b.book)}
+                            />{" "}
+                            {b.book}
+                          </label>
 
-              {bookSearch.trim() && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    border: `1px solid ${COLORS.border}`,
-                    borderRadius: 12,
-                    background: "#fff",
-                    padding: 10,
-                    color: COLORS.text,
-                  }}
-                >
-                  {loading ? (
-                    <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div>
-                  ) : searchedBooks.length === 0 ? (
-                    <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>검색 결과가 없어요.</div>
-                  ) : (
-                    <div style={{ display: "grid", gap: 8 }}>
-                      {searchedBooks.map((book) => {
-                        const checked = selectedBooks.has(book);
-                        return (
+                          {checked && (
+                            <input
+                              style={{ ...fieldStyle, marginTop: 6 }}
+                              value={chaptersByBook[b.book] || ""}
+                              onChange={(e) =>
+                                setChaptersByBook((m) => ({
+                                  ...m,
+                                  [b.book]: e.target.value,
+                                }))
+                              }
+                              placeholder="예: 4-8, 10"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* 선택한 책 목록 */}
+                  <div style={{ ...panel, marginTop: 14, borderStyle: "dashed", borderColor: COLORS.pink2 }}>
+                    <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.text }}>
+                      선택한 책 목록{" "}
+                      <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
+                        ({selectedBookList.length}권)
+                      </span>
+                    </div>
+
+                    {selectedBookList.length === 0 ? (
+                      <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
+                        아직 선택된 책이 없어요. 위에서 책을 체크해 주세요.
+                      </div>
+                    ) : (
+                      <div style={{ display: "grid", gap: 10 }}>
+                        {selectedBookList.map((book) => (
                           <div
                             key={book}
                             style={{
-                              border: `1px solid ${COLORS.border2}`,
+                              border: `1px solid ${COLORS.border}`,
                               borderRadius: 12,
                               padding: 10,
-                              background: checked ? COLORS.pinkSoft : "#fff",
-                              color: COLORS.text,
+                              background: "rgba(255,255,255,0.45)",
                             }}
                           >
-                            <label style={{ fontWeight: 900, cursor: "pointer", color: COLORS.text }}>
-                              <input type="checkbox" checked={checked} onChange={() => toggleBook(book)} /> {book}
-                            </label>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                gap: 10,
+                              }}
+                            >
+                              <div style={{ fontWeight: 900, color: COLORS.text }}>{book}</div>
 
-                            {checked && (
+                              <button
+                                type="button"
+                                onClick={() => unselectBook(book)}
+                                style={{
+                                  padding: "6px 10px",
+                                  borderRadius: 10,
+                                  border: `1px solid ${COLORS.pink2}`,
+                                  background: "rgba(255,255,255,0.65)",
+                                  color: COLORS.danger,
+                                  fontWeight: 900,
+                                  cursor: "pointer",
+                                  whiteSpace: "nowrap",
+                                }}
+                                title="선택 해제"
+                              >
+                                선택 해제
+                              </button>
+                            </div>
+
+                            <div style={{ marginTop: 8 }}>
                               <input
-                                style={{ ...fieldStyle, marginTop: 8 }}
+                                style={fieldStyle}
                                 value={chaptersByBook[book] || ""}
                                 onChange={(e) =>
                                   setChaptersByBook((m) => ({
@@ -756,163 +870,37 @@ export default function BookRangePage({ mode = "practice" }) {
                                 }
                                 placeholder="예: 4-8, 10"
                               />
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <div style={{ marginTop: 8, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
-                    * 여기서 체크한 책도 아래 “선택한 책 목록”에 자동 반영돼요.
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 분류 선택 */}
-            <h3 style={{ marginTop: 16, color: COLORS.text }}>분류 선택</h3>
-            <div style={{ maxHeight: 260, overflow: "auto", color: COLORS.text }}>
-              {loading ? <div style={{ color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div> : renderTree(null)}
-            </div>
-
-            {selectedCategoryId && (
-              <>
-                <h3 style={{ marginTop: 16, color: COLORS.text }}>책 선택 + 챕터 범위</h3>
-
-                {booksInCategory.map((b) => {
-                  const checked = selectedBooks.has(b.book);
-                  return (
-                    <div key={b.book} style={{ marginTop: 10 }}>
-                      <label style={{ fontWeight: 900, color: COLORS.text }}>
-                        <input type="checkbox" checked={checked} onChange={() => toggleBook(b.book)} /> {b.book}
-                      </label>
-
-                      {checked && (
-                        <input
-                          style={{ ...fieldStyle, marginTop: 6 }}
-                          value={chaptersByBook[b.book] || ""}
-                          onChange={(e) =>
-                            setChaptersByBook((m) => ({
-                              ...m,
-                              [b.book]: e.target.value,
-                            }))
-                          }
-                          placeholder="예: 4-8, 10"
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-
-                {/* 선택한 책 목록 */}
-                <div
-                  style={{
-                    marginTop: 16,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: `1px dashed ${COLORS.pink2}`,
-                    background: COLORS.pinkSoft,
-                    color: COLORS.text,
-                  }}
-                >
-                  <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.text }}>
-                    선택한 책 목록{" "}
-                    <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
-                      ({selectedBookList.length}권)
-                    </span>
-                  </div>
-
-                  {selectedBookList.length === 0 ? (
-                    <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
-                      아직 선택된 책이 없어요. 위에서 책을 체크해 주세요.
-                    </div>
-                  ) : (
-                    <div style={{ display: "grid", gap: 10 }}>
-                      {selectedBookList.map((book) => (
-                        <div
-                          key={book}
-                          style={{
-                            border: `1px solid ${COLORS.border}`,
-                            borderRadius: 12,
-                            padding: 10,
-                            background: "#fff",
-                            color: COLORS.text,
-                          }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              gap: 10,
-                            }}
-                          >
-                            <div style={{ fontWeight: 900, color: COLORS.text }}>{book}</div>
-
-                            <button
-                              type="button"
-                              onClick={() => unselectBook(book)}
-                              style={{
-                                padding: "6px 10px",
-                                borderRadius: 10,
-                                border: `1px solid ${COLORS.pink2}`,
-                                background: "#fff",
-                                color: COLORS.danger,
-                                fontWeight: 900,
-                                cursor: "pointer",
-                                whiteSpace: "nowrap",
-                                boxShadow: "0 8px 18px rgba(31,42,68,0.06)",
-                              }}
-                              title="선택 해제"
-                            >
-                              선택 해제
-                            </button>
-                          </div>
-
-                          <div style={{ marginTop: 8 }}>
-                            <input
-                              style={fieldStyle}
-                              value={chaptersByBook[book] || ""}
-                              onChange={(e) =>
-                                setChaptersByBook((m) => ({
-                                  ...m,
-                                  [book]: e.target.value,
-                                }))
-                              }
-                              placeholder="예: 4-8, 10"
-                            />
-                            <div style={{ marginTop: 6, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
-                              여기서 범위를 수정하면 바로 반영돼요.
+                              <div style={{ marginTop: 6, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
+                                여기서 범위를 수정하면 바로 반영돼요.
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-
-            {/* ✅✅ 정규 시작 버튼들: mode에 따라 분기 (official이면 "공식"만) */}
-            <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
-              {isOfficial ? (
-                <button type="button" onClick={() => go("/exam/official")} style={primaryBtn}>
-                  시험보기(공식)
-                </button>
-              ) : (
-                <>
-                  <button type="button" onClick={() => go("/practice/mcq")} style={primaryBtn}>
-                    연습하기 → 객관식
-                  </button>
-                  <button type="button" onClick={() => go("/practice/mock")} style={outlinePinkBtn}>
-                    연습하기 → 모의시험
-                  </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
-            </div>
-          </>
-        )}
+
+              <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
+                {isOfficial ? (
+                  <button type="button" onClick={() => go("/exam/official")} style={primaryBtn}>
+                    시험보기(공식)
+                  </button>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => go("/practice/mcq")} style={primaryBtn}>
+                      연습하기 → 객관식
+                    </button>
+                    <button type="button" onClick={() => go("/practice/mock")} style={outlinePinkBtn}>
+                      연습하기 → 모의시험
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </StudentShell>
   );

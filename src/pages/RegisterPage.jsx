@@ -3,17 +3,76 @@ import { supabase } from '../utils/supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
 
 const styles = {
-  page: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff5f8' },
-  card: { width: 420, background: '#fff', borderRadius: 12, boxShadow: '0 8px 24px rgba(255,192,217,0.35)', padding: 24 },
+  page: {
+    minHeight: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#fff5f8',
+    padding: 16,
+  },
+
+  // ✅ 흰색 네모칸 제거: background/boxShadow/radius 제거, width는 maxWidth로만 제한
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    padding: 12, // 너무 붙어 보이지 않게만
+    background: 'transparent',
+    boxShadow: 'none',
+    borderRadius: 0,
+  },
+
   title: { margin: 0, fontSize: 22, fontWeight: 800, color: '#ff6fa3', textAlign: 'center' },
   row2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 },
   row: { display: 'grid', gap: 8, marginTop: 12 },
-  label: { fontSize: 13, color: '#444' },
-  input: { width: '100%', padding: '12px 14px', border: '1px solid #ffd3e3', borderRadius: 10, outline: 'none', fontSize: 14 },
-  btn: { width: '100%', padding: '12px 14px', background: '#ff8fb7', color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer', marginTop: 14 },
-  small: { fontSize: 12, color: '#888' },
-  error: { background: '#ffe3ea', color: '#b00020', padding: '8px 10px', borderRadius: 8, fontSize: 13, marginTop: 10 },
-  success: { background: '#e7fff3', color: '#0a7a3d', padding: '8px 10px', borderRadius: 8, fontSize: 13, marginTop: 10 },
+  label: { fontSize: 13, color: '#444', fontWeight: 800 },
+
+  input: {
+    width: '100%',
+    padding: '12px 14px',
+    border: '1px solid #ffd3e3',
+    borderRadius: 12,
+    outline: 'none',
+    fontSize: 14,
+    background: 'rgba(255,255,255,0.9)', // ✅ 카드 없애도 입력칸은 잘 보이게
+  },
+
+  btn: {
+    width: '100%',
+    padding: '12px 14px',
+    background: '#ff8fb7',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 12,
+    fontWeight: 800,
+    cursor: 'pointer',
+    marginTop: 14,
+    boxShadow: '0 10px 20px rgba(255,111,163,0.18)', // 버튼만 살짝 떠 보이게
+  },
+
+  small: { fontSize: 12, color: '#777', fontWeight: 700 },
+
+  error: {
+    background: '#ffe3ea',
+    color: '#b00020',
+    padding: '8px 10px',
+    borderRadius: 12,
+    fontSize: 13,
+    marginTop: 10,
+    fontWeight: 800,
+    border: '1px solid #ffb8c9',
+  },
+
+  success: {
+    background: '#e7fff3',
+    color: '#0a7a3d',
+    padding: '8px 10px',
+    borderRadius: 12,
+    fontSize: 13,
+    marginTop: 10,
+    fontWeight: 800,
+    border: '1px solid #b3f0d0',
+  },
 };
 
 export default function RegisterPage() {
@@ -43,8 +102,7 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      // 프로필 생성 (RLS 비활성 가정)
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('profiles')
         .insert([
           {
@@ -52,19 +110,15 @@ export default function RegisterPage() {
             name: nm,
             school: sc || null,
             grade: gr || null,
-            phone: ph,          // 트리거가 phone_last4를 자동 채움
+            phone: ph, // 트리거가 phone_last4를 자동 채움
             teacher_name: tn,
           },
         ])
         .select('id,name');
 
       if (error) {
-        // unique (name, phone_last4) 위반 시
-        if (error.code === '23505') {
-          setErr('이미 같은 이름/전화번호(뒷4자리)의 학생이 있어요. 확인해 주세요.');
-        } else {
-          setErr('회원가입 중 오류가 발생했어요.');
-        }
+        if (error.code === '23505') setErr('이미 같은 이름/전화번호(뒷4자리)의 학생이 있어요. 확인해 주세요.');
+        else setErr('회원가입 중 오류가 발생했어요.');
         return;
       }
 
@@ -108,7 +162,9 @@ export default function RegisterPage() {
             onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
             inputMode="numeric"
           />
-          <div style={styles.small}>로그인은 <b>이름 + 전화번호 뒷 4자리</b>로 진행돼요.</div>
+          <div style={styles.small}>
+            로그인은 <b>이름 + 전화번호 뒷 4자리</b>로 진행돼요.
+          </div>
         </div>
 
         <div style={styles.row}>
@@ -124,7 +180,9 @@ export default function RegisterPage() {
         </button>
 
         <div style={{ marginTop: 10, textAlign: 'center' }}>
-          <Link to="/" style={{ color: '#ff6fa3', textDecoration: 'none', fontWeight: 600 }}>로그인으로 돌아가기</Link>
+          <Link to="/" style={{ color: '#ff6fa3', textDecoration: 'none', fontWeight: 800 }}>
+            로그인으로 돌아가기
+          </Link>
         </div>
       </form>
     </div>

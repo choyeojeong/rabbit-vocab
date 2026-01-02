@@ -13,18 +13,15 @@ export default function Dashboard() {
   }, []);
 
   const isAdmin = useMemo(() => {
-    // 세션(role) 우선, 없으면 sessionStorage(role)로 보조 판정
     const roleFromSession = me?.role;
     const roleFromStorage = sessionStorage.getItem("role");
     return roleFromSession === "admin" || roleFromStorage === "admin";
   }, [me]);
 
   function logout() {
-    // 앱 세션 정리 + role 플래그 정리 (AdminGate 통과 흔적 제거)
     clearSession();
     sessionStorage.removeItem("role");
 
-    // 혹시 남아있던 이전 방식 키들도 정리(있어도 무해)
     sessionStorage.removeItem("admin_authed");
     sessionStorage.removeItem("admin_authed_v1");
     localStorage.removeItem("teacher_ok");
@@ -35,9 +32,22 @@ export default function Dashboard() {
 
   return (
     <StudentShell>
-      {/* 중앙 정렬 */}
-      <div className="vh-100 centered with-safe" style={{ width: "100%" }}>
-        <div className="student-container">
+      {/* ✅ StudentShell이 어떤 레이아웃을 쓰든 "진짜 중앙"으로 고정 */}
+      <div
+        style={{
+          minHeight: "100dvh",
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
+          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+          paddingLeft: 16,
+          paddingRight: 16,
+        }}
+      >
+        {/* ✅ 카드가 너무 넓어지지 않게 */}
+        <div style={{ width: "100%", maxWidth: 520 }}>
           <div className="student-card stack">
             {/* 상단: 인사 + 로그아웃 */}
             <div
@@ -69,64 +79,42 @@ export default function Dashboard() {
             {/* ✅ 관리자 전용 대시보드 */}
             {isAdmin ? (
               <>
-                <div
-                  className="student-text"
-                  style={{ fontWeight: 700, marginTop: 12 }}
-                >
+                <div className="student-text" style={{ fontWeight: 800, marginTop: 12 }}>
                   관리자 전용
                 </div>
 
                 <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/admin/users")}
-                  >
+                  <button className="student-button" onClick={() => navigate("/admin/users")}>
                     학생관리
                   </button>
 
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/teacher/review")}
-                  >
+                  <button className="student-button" onClick={() => navigate("/teacher/review")}>
                     검수 목록
                   </button>
 
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/teacher/today")}
-                  >
+                  <button className="student-button" onClick={() => navigate("/teacher/today")}>
                     오늘의 통과/불통과
                   </button>
 
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/teacher/focus")}
-                  >
+                  <button className="student-button" onClick={() => navigate("/teacher/focus")}>
                     집중 모니터(이탈 감지)
                   </button>
 
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/admin/csv")}
-                  >
+                  <button className="student-button" onClick={() => navigate("/admin/csv")}>
                     CSV 관리
                   </button>
 
-                  {/* ✅ 추가: 오답노트(학생별) */}
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/admin/wrongs")}
-                  >
+                  <button className="student-button" onClick={() => navigate("/admin/wrongs")}>
                     오답노트(학생별)
                   </button>
 
-                  {/* ✅ 단어책 분류(신규) */}
                   <button
                     className="student-button"
                     onClick={() => navigate("/admin/book-categories")}
                   >
                     단어책 분류 관리(대/중/소)
                   </button>
+
                   <button
                     className="student-button"
                     onClick={() => navigate("/admin/book-categorize")}
@@ -143,18 +131,14 @@ export default function Dashboard() {
               /* ✅ 학생용 대시보드 */
               <>
                 <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/study")}
-                  >
+                  <button className="student-button" onClick={() => navigate("/study")}>
                     단어 공부 시작하기
                   </button>
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/official")}
-                  >
+
+                  <button className="student-button" onClick={() => navigate("/official")}>
                     시험보기(공식)
                   </button>
+
                   <button
                     className="student-button"
                     onClick={() => navigate("/exam/official/results")}
