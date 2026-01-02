@@ -35,6 +35,8 @@ const styles = {
     padding: 16,
     boxShadow: '0 10px 30px rgba(255,111,163,.10)',
     color: COLORS.text,
+    width: '100%',
+    maxWidth: '100%',
   },
 
   row: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 },
@@ -164,14 +166,16 @@ function normalizeInput({ locState, query }) {
 
   return {
     mode: 'single',
-    selections: [{
-      book: legacy.book,
-      chaptersText: legacy._rawChaptersParam || '',
-      chapters: legacy.chapters,
-      start: legacy.start,
-      end: legacy.end,
-      raw: null,
-    }],
+    selections: [
+      {
+        book: legacy.book,
+        chaptersText: legacy._rawChaptersParam || '',
+        chapters: legacy.chapters,
+        start: legacy.start,
+        end: legacy.end,
+        raw: null,
+      },
+    ],
     legacy,
     wrong_book_ids: [],
   };
@@ -270,7 +274,7 @@ export default function OfficialExamPage() {
 
   // ✅ 이 페이지로 들어올 때의 "원래 모드"(practice/official)
   // BookRangePage가 nav(path, { state: { mode, ... } })로 넘겨준 mode를 사용
-  const originMode = (loc?.state?.mode === 'official') ? 'official' : 'practice';
+  const originMode = loc?.state?.mode === 'official' ? 'official' : 'practice';
   const backToRangePath = originMode === 'official' ? '/official' : '/study';
 
   const input = useMemo(() => {
@@ -321,7 +325,9 @@ export default function OfficialExamPage() {
     return `${list.length}권 선택: ${list.join(' / ')}`;
   }, [mode, selections, legacy._rawChaptersParam, wrongBookIds.length]);
 
-  useEffect(() => { answerRef.current = answer; }, [answer]);
+  useEffect(() => {
+    answerRef.current = answer;
+  }, [answer]);
 
   // ✅ 단어 로드: 오답모드 or 정규모드
   useEffect(() => {
@@ -367,7 +373,9 @@ export default function OfficialExamPage() {
       }
     })();
 
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [mode, selections, legacy._rawChaptersParam, wrongBookIds]);
 
   useExamFocusGuard({
@@ -387,21 +395,23 @@ export default function OfficialExamPage() {
       lastFocusEventAtRef.current = now;
 
       const curWord = seq?.[i];
-      await supabase.from('focus_events').insert([{
-        session_id: sessionId,
-        student_id: me?.id,
-        student_name: profileMeta?.name || me?.name || '',
-        teacher_name: profileMeta?.teacher_name ?? null,
-        event_type: eventType,
-        detail: {
-          ...detail,
-          book: curWord?.book || null,
-          at_question: (i + 1) || null,
-          total_questions: seq?.length || null,
-          visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
-          href: typeof window !== 'undefined' ? window.location?.href : null,
+      await supabase.from('focus_events').insert([
+        {
+          session_id: sessionId,
+          student_id: me?.id,
+          student_name: profileMeta?.name || me?.name || '',
+          teacher_name: profileMeta?.teacher_name ?? null,
+          event_type: eventType,
+          detail: {
+            ...detail,
+            book: curWord?.book || null,
+            at_question: (i + 1) || null,
+            total_questions: seq?.length || null,
+            visibilityState: typeof document !== 'undefined' ? document.visibilityState : null,
+            href: typeof window !== 'undefined' ? window.location?.href : null,
+          },
         },
-      }]);
+      ]);
     } catch {}
   }
 
@@ -409,7 +419,9 @@ export default function OfficialExamPage() {
     if (phase !== 'exam') return;
     if (!sessionId) return;
 
-    const onVis = () => { if (document.visibilityState === 'hidden') reportFocusEvent('hidden'); };
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') reportFocusEvent('hidden');
+    };
     const onBlur = () => reportFocusEvent('blur');
     const onPageHide = (e) => reportFocusEvent('pagehide', { persisted: !!e?.persisted });
 
@@ -442,8 +454,10 @@ export default function OfficialExamPage() {
         let rangeText = (sel?.chaptersText || '').trim();
         if (!rangeText) {
           if (chapters.length) rangeText = chapters.join(', ');
-          else if (sel?.raw && typeof sel.raw?.chapters === 'string' && sel.raw.chapters.trim()) rangeText = sel.raw.chapters.trim();
-          else if (legacy._rawChaptersParam && book === legacy.book && !chapters.length) rangeText = legacy._rawChaptersParam.trim();
+          else if (sel?.raw && typeof sel.raw?.chapters === 'string' && sel.raw.chapters.trim())
+            rangeText = sel.raw.chapters.trim();
+          else if (legacy._rawChaptersParam && book === legacy.book && !chapters.length)
+            rangeText = legacy._rawChaptersParam.trim();
           else if (hasRange) rangeText = `${Math.min(sel.start, sel.end)}~${Math.max(sel.start, sel.end)}`;
           else rangeText = '미지정';
         }
@@ -462,9 +476,13 @@ export default function OfficialExamPage() {
   }
 
   async function startExam() {
-    if (!me?.id) { alert('로그인이 필요합니다.'); return nav('/'); }
+    if (!me?.id) {
+      alert('로그인이 필요합니다.');
+      return nav('/');
+    }
     if (mode === 'none') return alert('잘못된 접근입니다. (범위 정보 없음)');
-    if (!words.length) return alert(mode === 'wrong' ? '선택한 오답 파일에 단어가 없습니다.' : '선택한 범위에 단어가 없습니다.');
+    if (!words.length)
+      return alert(mode === 'wrong' ? '선택한 오답 파일에 단어가 없습니다.' : '선택한 범위에 단어가 없습니다.');
 
     const n = Math.max(1, Math.min(Number(numQ) || 0, words.length));
     if (n !== numQ) setNumQ(n);
@@ -483,7 +501,8 @@ export default function OfficialExamPage() {
       return alert(e.message || '범위 계산 중 오류');
     }
 
-    let profileName = '', profileTeacher = null;
+    let profileName = '',
+      profileTeacher = null;
     try {
       const { data: profile } = await supabase
         .from('profiles')
@@ -514,11 +533,7 @@ export default function OfficialExamPage() {
         auto_pass: null,
       };
 
-      const { data, error } = await supabase
-        .from('test_sessions')
-        .insert([payload])
-        .select('id')
-        .single();
+      const { data, error } = await supabase.from('test_sessions').insert([payload]).select('id').single();
 
       if (error) throw error;
       if (!data?.id) throw new Error('SESSION_INSERT_OK_BUT_NO_ID');
@@ -564,20 +579,28 @@ export default function OfficialExamPage() {
       });
     }, 1000);
 
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
     // eslint-disable-next-line
   }, [phase, i]);
 
   async function log(action, word) {
     try {
-      await supabase.from('study_logs').insert([{
-        student_id: me?.id,
-        book: word?.book || (mode === 'wrong' ? '오답' : (selections?.[0]?.book || legacy.book)) || null,
-        chapter: word?.chapter ?? null,
-        word_id: word?.id ?? word?.word_id ?? null,
-        action,
-        payload: { mode: 'official', source: mode === 'wrong' ? 'wrong' : 'regular', wrong_book_ids: mode === 'wrong' ? wrongBookIds : null },
-      }]);
+      await supabase.from('study_logs').insert([
+        {
+          student_id: me?.id,
+          book: word?.book || (mode === 'wrong' ? '오답' : (selections?.[0]?.book || legacy.book)) || null,
+          chapter: word?.chapter ?? null,
+          word_id: word?.id ?? word?.word_id ?? null,
+          action,
+          payload: {
+            mode: 'official',
+            source: mode === 'wrong' ? 'wrong' : 'regular',
+            wrong_book_ids: mode === 'wrong' ? wrongBookIds : null,
+          },
+        },
+      ]);
     } catch {}
   }
 
@@ -594,8 +617,12 @@ export default function OfficialExamPage() {
     const your = (forcedAnswer ?? answerRef.current ?? '').toString();
     const ok = isAnswerCorrect(your, word);
 
-    if (ok) { setCorrects((s) => s + 1); log('got_right', word); }
-    else { log('got_wrong', word); }
+    if (ok) {
+      setCorrects((s) => s + 1);
+      log('got_right', word);
+    } else {
+      log('got_wrong', word);
+    }
 
     const next = [...results, { word, your, ok }];
     setResults(next);
@@ -679,25 +706,18 @@ export default function OfficialExamPage() {
     }
   }
 
-  if (mode === 'none') {
-    return (
-      <StudentShell>
-        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
-          <div className="student-container">
-            <div className="student-card" style={{ ...styles.topCard, textAlign: 'center' }}>
-              잘못된 접근입니다.
-            </div>
-          </div>
-        </div>
-      </StudentShell>
-    );
-  }
-
-  const rangeTextForConfig = headerText ||
+  const rangeTextForConfig =
+    headerText ||
     (mode === 'wrong'
       ? `오답 파일 ${wrongBookIds.length}개 선택`
       : selectionToText(
-          selections?.[0] || { book: legacy.book, chapters: legacy.chapters, start: legacy.start, end: legacy.end, chaptersText: legacy._rawChaptersParam },
+          selections?.[0] || {
+            book: legacy.book,
+            chapters: legacy.chapters,
+            start: legacy.start,
+            end: legacy.end,
+            chaptersText: legacy._rawChaptersParam,
+          },
           legacy._rawChaptersParam
         ));
 
@@ -709,117 +729,145 @@ export default function OfficialExamPage() {
     return [b, ch].filter(Boolean).join(' | ');
   }, [seq, i]);
 
-  return (
-    <StudentShell>
-      <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
-        <div className="student-container">
-          <div className="student-card" style={styles.topCard}>
-            {phase === 'config' && (
-              <>
-                <div className="student-row">
-                  <div>
-                    <div style={styles.label}>책 / 범위</div>
-                    <div style={styles.info}>{rangeTextForConfig}</div>
-                  </div>
-                  <div />
-                  <div>
-                    <div style={styles.label}>문제 수</div>
-                    <input
-                      style={styles.input}
-                      value={numQ}
-                      onChange={(e) => setNumQ(e.target.value)}
-                      type="number"
-                      min={1}
-                      max={999}
-                      inputMode="numeric"
-                    />
-                  </div>
-                  <div>
-                    <div style={styles.label}>커트라인(-X컷)</div>
-                    <input
-                      style={styles.input}
-                      value={cutMiss}
-                      onChange={(e) => setCutMiss(e.target.value)}
-                      type="number"
-                      min={0}
-                      max={999}
-                      inputMode="numeric"
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button type="button" style={styles.btn} onClick={startExam}>
-                    시작하기
-                  </button>
-
-                  {/* ✅ 원래 들어온 모드에 맞춰 /official 또는 /study 로 복귀 */}
-                  <button type="button" style={styles.ghostBtn} onClick={() => nav(backToRangePath)}>
-                    범위 다시 선택
-                  </button>
-                </div>
-              </>
-            )}
-
-            {phase === 'exam' && (
-              <div style={{ marginTop: 6 }}>
-                <div style={styles.metaLine}>
-                  <div>문항 {i + 1} / {seq.length}</div>
-                  <div>맞춘 개수: {corrects}</div>
-                </div>
-
-                {currentMetaText && <div style={styles.metaCenter}>{currentMetaText}</div>}
-
-                <div style={styles.term}>{seq[i]?.term_en}</div>
-                <div style={styles.timer}>남은 시간: {remaining}초</div>
-
-                <div style={{ marginTop: 14 }}>
-                  <input
-                    key={inputKey}
-                    ref={inputRef}
-                    style={styles.input}
-                    placeholder="뜻을 입력하세요 (예: 달리다)"
-                    value={answer}
-                    onChange={(e) => setAnswer(e.target.value)}
-                    onCompositionStart={() => setIsComposing(true)}
-                    onCompositionEnd={(e) => { setIsComposing(false); setAnswer(e.currentTarget.value); }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        if (!isComposing) submitCurrent(answer);
-                      }
-                    }}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                  />
-                </div>
-
-                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button type="button" style={styles.btn} onClick={() => submitCurrent(answerRef.current)}>
-                    제출(Enter)
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {phase === 'submitted' && (
-              <div>
-                <div style={styles.warn}>
-                  <b>제출 완료</b><br />
-                  시험 결과는 선생님 검수 후 전달됩니다. 잠시만 기다려 주세요.
-                </div>
-                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {/* ✅ 공식에서 들어온 경우 다시 /official로 */}
-                  <button type="button" style={styles.btn} onClick={() => nav(backToRangePath)}>
-                    다른 범위로 공부
-                  </button>
-                  <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>
-                    대시보드
-                  </button>
-                </div>
-              </div>
-            )}
+  // ✅ 잘못된 접근도 “풀폭”으로만 표시 (가운데 네모 래퍼 제거)
+  if (mode === 'none') {
+    return (
+      <StudentShell>
+        <div style={styles.topCard}>
+          잘못된 접근입니다.
+          <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" style={styles.btn} onClick={() => nav(backToRangePath)}>
+              범위 선택으로
+            </button>
+            <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>
+              대시보드
+            </button>
           </div>
         </div>
+      </StudentShell>
+    );
+  }
+
+  return (
+    <StudentShell>
+      {/* ✅ 풀스크린: centered/student-container 래퍼 제거 */}
+      <div style={styles.topCard}>
+        {phase === 'config' && (
+          <>
+            <div>
+              <div style={styles.label}>책 / 범위</div>
+              <div style={styles.info}>{rangeTextForConfig}</div>
+            </div>
+
+            <div style={styles.row}>
+              <div>
+                <div style={styles.label}>문제 수</div>
+                <input
+                  style={styles.input}
+                  value={numQ}
+                  onChange={(e) => setNumQ(e.target.value)}
+                  type="number"
+                  min={1}
+                  max={999}
+                  inputMode="numeric"
+                />
+              </div>
+              <div>
+                <div style={styles.label}>커트라인(-X컷)</div>
+                <input
+                  style={styles.input}
+                  value={cutMiss}
+                  onChange={(e) => setCutMiss(e.target.value)}
+                  type="number"
+                  min={0}
+                  max={999}
+                  inputMode="numeric"
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" style={styles.btn} onClick={startExam}>
+                시작하기
+              </button>
+
+              {/* ✅ 원래 들어온 모드에 맞춰 /official 또는 /study 로 복귀 */}
+              <button type="button" style={styles.ghostBtn} onClick={() => nav(backToRangePath)}>
+                범위 다시 선택
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase === 'exam' && (
+          <div style={{ marginTop: 6 }}>
+            <div style={styles.metaLine}>
+              <div>
+                문항 {i + 1} / {seq.length}
+              </div>
+              <div>맞춘 개수: {corrects}</div>
+            </div>
+
+            {currentMetaText && <div style={styles.metaCenter}>{currentMetaText}</div>}
+
+            <div style={styles.term}>{seq[i]?.term_en}</div>
+            <div style={styles.timer}>남은 시간: {remaining}초</div>
+
+            <div style={{ marginTop: 14 }}>
+              <input
+                key={inputKey}
+                ref={inputRef}
+                style={styles.input}
+                placeholder="뜻을 입력하세요 (예: 달리다)"
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                onCompositionStart={() => setIsComposing(true)}
+                onCompositionEnd={(e) => {
+                  setIsComposing(false);
+                  setAnswer(e.currentTarget.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (!isComposing) submitCurrent(answer);
+                  }
+                }}
+                autoCapitalize="none"
+                autoCorrect="off"
+              />
+            </div>
+
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" style={styles.btn} onClick={() => submitCurrent(answerRef.current)}>
+                제출(Enter)
+              </button>
+
+              {/* (선택) 중단 버튼이 필요하면 여기서 backToRangePath로 */}
+              {/* <button type="button" style={styles.ghostBtn} onClick={() => {
+                if (confirm('시험을 중단하고 범위 선택으로 돌아갈까요?')) nav(backToRangePath);
+              }}>
+                중단
+              </button> */}
+            </div>
+          </div>
+        )}
+
+        {phase === 'submitted' && (
+          <div>
+            <div style={styles.warn}>
+              <b>제출 완료</b>
+              <br />
+              시험 결과는 선생님 검수 후 전달됩니다. 잠시만 기다려 주세요.
+            </div>
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" style={styles.btn} onClick={() => nav(backToRangePath)}>
+                다른 범위로 공부
+              </button>
+              <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>
+                대시보드
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </StudentShell>
   );

@@ -119,15 +119,19 @@ export default function OfficialResultList() {
     return decorated;
   }, [decorated, tab]);
 
+  // ✅ 풀폭 카드 스타일(OfficialExamPage처럼)
   const styles = {
-    shell: { width: "100%", color: COLORS.text },
-    card: {
+    topCard: {
       background: COLORS.card,
       border: `1px solid ${COLORS.border}`,
       borderRadius: 16,
       padding: 14,
       boxShadow: "0 10px 30px rgba(31,42,68,0.06)",
+      width: "100%",
+      maxWidth: "100%",
+      color: COLORS.text,
     },
+
     topRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 },
     title: { fontSize: 18, fontWeight: 900, color: COLORS.text, margin: 0 },
     sub: { fontSize: 12, color: COLORS.sub, marginTop: 2 },
@@ -230,32 +234,41 @@ export default function OfficialResultList() {
     }),
     arrow: { fontSize: 18, fontWeight: 900, color: "#a7b0bf", textAlign: "right" },
 
-    // Mobile hint
+    // Misc
     mobileHint: { marginTop: 10, fontSize: 12, color: COLORS.sub, textAlign: "center" },
     bottomLink: { marginTop: 12, color: COLORS.blue, fontWeight: 900, display: "inline-block" },
+
+    // auth empty state
+    authText: { color: COLORS.text, fontWeight: 900 },
+    authBtn: {
+      padding: "12px 16px",
+      borderRadius: 12,
+      border: "none",
+      background: `linear-gradient(90deg, ${COLORS.pink}, ${COLORS.pink2})`,
+      color: "#fff",
+      fontWeight: 900,
+      cursor: "pointer",
+      boxShadow: "0 10px 20px rgba(255,111,163,0.22)",
+    },
   };
 
-  // 비로그인 상태
+  // 비로그인 상태 (✅ 풀폭 카드로)
   if (!who.id && !who.name) {
     return (
       <StudentShell>
-        <div className="vh-100 centered with-safe" style={styles.shell}>
-          <div className="student-container">
-            <div className="student-card stack" style={styles.card}>
-              <div className="student-text" style={{ color: COLORS.text, fontWeight: 900 }}>
-                로그인 후 공식시험 결과를 확인할 수 있어요.
-              </div>
-              <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-                <button className="student-button" onClick={() => nav("/login")}>
-                  로그인 하러 가기
-                </button>
-              </div>
-              <div style={{ marginTop: 10 }}>
-                <Link to="/" style={{ color: COLORS.blue, fontWeight: 900 }}>
-                  ← 홈으로
-                </Link>
-              </div>
-            </div>
+        <div style={styles.topCard}>
+          <div style={styles.authText}>로그인 후 공식시험 결과를 확인할 수 있어요.</div>
+
+          <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+            <button type="button" style={styles.authBtn} onClick={() => nav("/login")}>
+              로그인 하러 가기
+            </button>
+          </div>
+
+          <div style={{ marginTop: 10 }}>
+            <Link to="/" style={{ color: COLORS.blue, fontWeight: 900 }}>
+              ← 홈으로
+            </Link>
           </div>
         </div>
       </StudentShell>
@@ -264,146 +277,127 @@ export default function OfficialResultList() {
 
   return (
     <StudentShell>
-      <div className="vh-100 centered with-safe" style={styles.shell}>
-        <div className="student-container">
-          <div className="student-card stack" style={styles.card}>
-            {/* Header */}
-            <div style={styles.topRow}>
-              <div>
-                <h2 style={styles.title}>공식시험 결과</h2>
-                <div style={styles.sub}>
-                  확정된 결과만 표시돼요 · {who.name ? `${who.name} 학생` : "내 계정"}
-                </div>
-              </div>
-
-              <button onClick={fetchRows} style={styles.refreshBtn} title="새로고침">
-                ⟳ 새로고침
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div style={styles.tabsWrap} aria-label="결과 필터 탭">
-              <button
-                type="button"
-                style={styles.tabBtn(tab === "all")}
-                onClick={() => setTab("all")}
-              >
-                전체 <span style={styles.tabSmall}>{counts.total}</span>
-              </button>
-              <button
-                type="button"
-                style={styles.tabBtn(tab === "pass")}
-                onClick={() => setTab("pass")}
-              >
-                통과 <span style={styles.tabSmall}>{counts.pass}</span>
-              </button>
-              <button
-                type="button"
-                style={styles.tabBtn(tab === "fail")}
-                onClick={() => setTab("fail")}
-              >
-                불통과 <span style={styles.tabSmall}>{counts.fail}</span>
-              </button>
-            </div>
-
-            {err && <div style={{ marginTop: 10, color: "#b42318", fontWeight: 800 }}>{err}</div>}
-
-            {loading ? (
-              <div style={{ marginTop: 12, color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div>
-            ) : filtered.length === 0 ? (
-              <div style={{ marginTop: 12, color: COLORS.sub, fontWeight: 800 }}>
-                {tab === "all" ? "확정된 결과가 없습니다." : "해당 탭에 표시할 결과가 없어요."}
-              </div>
-            ) : (
-              <>
-                {/* Table */}
-                <div style={styles.tableWrap} role="table" aria-label="공식시험 결과 표">
-                  <div style={styles.headRow} role="row">
-                    <div role="columnheader">날짜</div>
-                    <div role="columnheader">책</div>
-                    <div role="columnheader">범위</div>
-                    <div role="columnheader" style={{ textAlign: "right" }}>
-                      문제수
-                    </div>
-                    <div role="columnheader">통과</div>
-                    <div role="columnheader" aria-hidden />
-                  </div>
-
-                  {filtered.map((r, idx) => {
-                    const href = `/exam/official/results/${r.id}`;
-                    const isLast = idx === filtered.length - 1;
-                    return (
-                      <Link
-                        key={r.id}
-                        to={href}
-                        role="row"
-                        style={{
-                          ...styles.bodyRowLink,
-                          borderBottom: isLast ? "none" : styles.bodyRowLink.borderBottom,
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = "#fff7fb";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = "#fff";
-                        }}
-                        onTouchStart={(e) => {
-                          e.currentTarget.style.background = "#fff7fb";
-                        }}
-                        onTouchEnd={(e) => {
-                          e.currentTarget.style.background = "#fff";
-                        }}
-                      >
-                        <div role="cell" style={styles.cellSub}>
-                          {r._dateStr}
-                        </div>
-
-                        <div role="cell" style={styles.cellMain} title={r.book || ""}>
-                          {r.book || "-"}
-                        </div>
-
-                        <div role="cell" style={styles.cellSub} title={r._range || ""}>
-                          {r._range}
-                        </div>
-
-                        <div
-                          role="cell"
-                          style={{
-                            ...styles.cellMain,
-                            textAlign: "right",
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          {r._numQ}문제
-                        </div>
-
-                        <div role="cell">
-                          <span style={styles.badge(!!r.final_pass)}>
-                            {r.final_pass ? "통과" : "불통과"}
-                            <span style={{ opacity: 0.7, fontWeight: 900 }}>
-                              · -{r._wrong}
-                            </span>
-                          </span>
-                        </div>
-
-                        <div role="cell" style={styles.arrow} aria-hidden>
-                          ›
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-
-                <div style={styles.mobileHint}>원하는 행을 눌러 상세 결과를 확인하세요.</div>
-              </>
-            )}
-
-            <div style={{ marginTop: 10 }}>
-              <Link to="/dashboard" style={styles.bottomLink}>
-                ← 대시보드
-              </Link>
-            </div>
+      {/* ✅ 풀폭 카드: 가운데 네모 래퍼 제거 */}
+      <div style={styles.topCard}>
+        {/* Header */}
+        <div style={styles.topRow}>
+          <div>
+            <h2 style={styles.title}>공식시험 결과</h2>
+            <div style={styles.sub}>확정된 결과만 표시돼요 · {who.name ? `${who.name} 학생` : "내 계정"}</div>
           </div>
+
+          <button onClick={fetchRows} style={styles.refreshBtn} title="새로고침" type="button">
+            ⟳ 새로고침
+          </button>
+        </div>
+
+        {/* Tabs */}
+        <div style={styles.tabsWrap} aria-label="결과 필터 탭">
+          <button type="button" style={styles.tabBtn(tab === "all")} onClick={() => setTab("all")}>
+            전체 <span style={styles.tabSmall}>{counts.total}</span>
+          </button>
+          <button type="button" style={styles.tabBtn(tab === "pass")} onClick={() => setTab("pass")}>
+            통과 <span style={styles.tabSmall}>{counts.pass}</span>
+          </button>
+          <button type="button" style={styles.tabBtn(tab === "fail")} onClick={() => setTab("fail")}>
+            불통과 <span style={styles.tabSmall}>{counts.fail}</span>
+          </button>
+        </div>
+
+        {err && <div style={{ marginTop: 10, color: "#b42318", fontWeight: 800 }}>{err}</div>}
+
+        {loading ? (
+          <div style={{ marginTop: 12, color: COLORS.sub, fontWeight: 800 }}>불러오는 중…</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ marginTop: 12, color: COLORS.sub, fontWeight: 800 }}>
+            {tab === "all" ? "확정된 결과가 없습니다." : "해당 탭에 표시할 결과가 없어요."}
+          </div>
+        ) : (
+          <>
+            {/* Table */}
+            <div style={styles.tableWrap} role="table" aria-label="공식시험 결과 표">
+              <div style={styles.headRow} role="row">
+                <div role="columnheader">날짜</div>
+                <div role="columnheader">책</div>
+                <div role="columnheader">범위</div>
+                <div role="columnheader" style={{ textAlign: "right" }}>
+                  문제수
+                </div>
+                <div role="columnheader">통과</div>
+                <div role="columnheader" aria-hidden />
+              </div>
+
+              {filtered.map((r, idx) => {
+                const href = `/exam/official/results/${r.id}`;
+                const isLast = idx === filtered.length - 1;
+                return (
+                  <Link
+                    key={r.id}
+                    to={href}
+                    role="row"
+                    style={{
+                      ...styles.bodyRowLink,
+                      borderBottom: isLast ? "none" : styles.bodyRowLink.borderBottom,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "#fff7fb";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "#fff";
+                    }}
+                    onTouchStart={(e) => {
+                      e.currentTarget.style.background = "#fff7fb";
+                    }}
+                    onTouchEnd={(e) => {
+                      e.currentTarget.style.background = "#fff";
+                    }}
+                  >
+                    <div role="cell" style={styles.cellSub}>
+                      {r._dateStr}
+                    </div>
+
+                    <div role="cell" style={styles.cellMain} title={r.book || ""}>
+                      {r.book || "-"}
+                    </div>
+
+                    <div role="cell" style={styles.cellSub} title={r._range || ""}>
+                      {r._range}
+                    </div>
+
+                    <div
+                      role="cell"
+                      style={{
+                        ...styles.cellMain,
+                        textAlign: "right",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {r._numQ}문제
+                    </div>
+
+                    <div role="cell">
+                      <span style={styles.badge(!!r.final_pass)}>
+                        {r.final_pass ? "통과" : "불통과"}
+                        <span style={{ opacity: 0.7, fontWeight: 900 }}>· -{r._wrong}</span>
+                      </span>
+                    </div>
+
+                    <div role="cell" style={styles.arrow} aria-hidden>
+                      ›
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+
+            <div style={styles.mobileHint}>원하는 행을 눌러 상세 결과를 확인하세요.</div>
+          </>
+        )}
+
+        <div style={{ marginTop: 10 }}>
+          <Link to="/dashboard" style={styles.bottomLink}>
+            ← 대시보드
+          </Link>
         </div>
       </div>
     </StudentShell>

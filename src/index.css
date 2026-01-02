@@ -4,6 +4,7 @@
    Rabbit Global Theme (Light / Pink)
    - 목표: 전역 대비(글자색) 안전하게 고정
    - button 전역 스타일로 인한 흰글씨 문제 방지
+   - ✅ Student 레이아웃 "가운데 흰 네모" 강제(max-width/center) 해제
    ========================================= */
 
 :root {
@@ -228,6 +229,58 @@ button.sm {
   border: 1px solid var(--pink-border);
   background: var(--pink-soft);
   color: #c94a7a;
+}
+
+/* =========================================
+   ✅ Student Full-Width Overrides (핵심!)
+   - "가운데 흰 네모"가 되는 원인: container/card/max-width + centered flex
+   - StudentShell을 바꿔도 CSS가 다시 가둬버리면 그대로여서, 전역에서 확실히 풀어줌
+   - 아래는 되도록 "학생 페이지" 영역에만 영향이 가도록 범위를 좁혀둠
+   ========================================= */
+
+/* StudentShell 최상단 래퍼: 항상 화면 전체 */
+.page.student-page {
+  width: 100%;
+  min-height: 100dvh;
+}
+
+/* 기존 student-container가 max-width/margin auto로 가운데로 모으는 경우가 많아서 해제 */
+.page.student-page .student-container {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding-left: 12px;
+  padding-right: 12px;
+  padding-top: 12px;
+  padding-bottom: 16px;
+  box-sizing: border-box;
+}
+
+/* 특정 페이지들이 vh-100/centered로 다시 가운데 고정하는 경우가 있어, 학생 페이지에선 풀어줌 */
+.page.student-page .vh-100 {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* centered가 flex로 "가운데 정렬"을 강제하면, 학생 페이지에서는 stretch로 */
+.page.student-page .centered {
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+}
+
+/* 학생 페이지에서 student-card가 max-width로 "흰 네모"를 만들면 기본은 풀폭으로 해제
+   - 카드 느낌이 필요한 페이지는 개별 컴포넌트에서 inline style or 별도 클래스(예: .card-narrow)로 사용 */
+.page.student-page .student-card {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  box-sizing: border-box;
+}
+
+/* ✅ (선택) 좁은 카드가 필요한 곳을 위한 옵션 클래스 */
+.card-narrow {
+  max-width: 520px;
+  margin: 0 auto;
 }
 
 /* 다크모드는 사용하지 않음 (테마 고정) */

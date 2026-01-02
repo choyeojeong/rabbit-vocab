@@ -28,6 +28,7 @@ const COLORS = {
 };
 
 const styles = {
+  // ✅ 풀폭에서 상단 정보 박스 느낌만 유지
   topCard: {
     background: COLORS.card,
     border: `1px solid ${COLORS.border}`,
@@ -35,6 +36,8 @@ const styles = {
     padding: 16,
     boxShadow: '0 10px 30px rgba(255,111,163,.10)',
     color: COLORS.text,
+    width: '100%',
+    maxWidth: '100%',
   },
 
   row: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 },
@@ -56,6 +59,7 @@ const styles = {
 
   // ✅ 전역 button 영향 방지 위해 버튼 스타일 확정
   primaryBtn: {
+    width: '100%',
     padding: '12px 16px',
     borderRadius: 12,
     border: 'none',
@@ -83,6 +87,8 @@ const styles = {
     marginTop: 12,
     background: COLORS.card,
     color: COLORS.text,
+    width: '100%',
+    maxWidth: '100%',
   },
 
   term: { fontSize: 28, fontWeight: 900, color: COLORS.text, textAlign: 'center', marginTop: 10 },
@@ -305,6 +311,12 @@ export default function MockExamPage() {
   const legacy = input.legacy || {};
   const wrongBookIds = input.wrong_book_ids || [];
 
+  // ✅ “범위 다시 고르기/중단” 시 복귀 경로
+  // - 공식 모드에서 들어왔으면 /official
+  // - 그 외는 /study
+  const originMode = (loc.state?.mode || '').toString();
+  const backToRange = originMode === 'official' ? '/official' : '/study';
+
   // 설정 단계
   const [numQ, setNumQ] = useState(30);
   const [cutMiss, setCutMiss] = useState(3);
@@ -502,20 +514,6 @@ export default function MockExamPage() {
     return miss <= cutMiss ? '통과' : '불통과';
   }
 
-  if (mode === 'none') {
-    return (
-      <StudentShell>
-        <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
-          <div className="student-container">
-            <div className="student-card" style={{ ...styles.topCard, textAlign: 'center' }}>
-              잘못된 접근입니다.
-            </div>
-          </div>
-        </div>
-      </StudentShell>
-    );
-  }
-
   // 상단 현재 문항 메타
   const currentMetaText = useMemo(() => {
     const w = seq[i];
@@ -525,173 +523,180 @@ export default function MockExamPage() {
     return [b, ch].filter(Boolean).join(' | ');
   }, [seq, i]);
 
+  if (mode === 'none') {
+    return (
+      <StudentShell>
+        <div style={styles.card}>
+          잘못된 접근입니다.
+          <div style={{ marginTop: 12 }}>
+            <button type="button" style={styles.primaryBtn} onClick={() => nav(backToRange)}>
+              범위 선택으로
+            </button>
+          </div>
+        </div>
+      </StudentShell>
+    );
+  }
+
   return (
     <StudentShell>
-      <div className="vh-100 centered with-safe" style={{ width: '100%' }}>
-        <div className="student-container">
-          <div className="student-card" style={styles.topCard}>
-            {/* 상단 간략 정보 */}
-            <div style={styles.topInfo}>
-              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {headerText || (selections[0] ? selectionToText(selections[0], legacy._rawChaptersParam) : '')}
+      {/* ✅ 풀스크린: centered/student-container 래퍼 제거 */}
+      <div style={styles.topCard}>
+        {/* 상단 간략 정보 */}
+        <div style={styles.topInfo}>
+          <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {headerText || (selections[0] ? selectionToText(selections[0], legacy._rawChaptersParam) : '')}
+          </div>
+          {phase === 'exam' && currentMetaText && <div style={styles.topSub}>현재: {currentMetaText}</div>}
+        </div>
+
+        {/* 설정 */}
+        {phase === 'config' && (
+          <>
+            <div className="grid" style={styles.row}>
+              <div>
+                <div style={styles.label}>문제 수</div>
+                <input
+                  style={styles.input}
+                  value={numQ}
+                  onChange={(e) => setNumQ(e.target.value)}
+                  type="number"
+                  min={1}
+                  max={999}
+                  inputMode="numeric"
+                />
               </div>
-              {phase === 'exam' && currentMetaText && <div style={styles.topSub}>현재: {currentMetaText}</div>}
+              <div>
+                <div style={styles.label}>커트라인(-X컷에서 X)</div>
+                <input
+                  style={styles.input}
+                  value={cutMiss}
+                  onChange={(e) => setCutMiss(e.target.value)}
+                  type="number"
+                  min={0}
+                  max={999}
+                  inputMode="numeric"
+                />
+              </div>
             </div>
 
-            {/* 설정 */}
-            {phase === 'config' && (
-              <>
-                <div className="grid" style={styles.row}>
-                  <div>
-                    <div style={styles.label}>문제 수</div>
-                    <input
-                      style={styles.input}
-                      value={numQ}
-                      onChange={(e) => setNumQ(e.target.value)}
-                      type="number"
-                      min={1}
-                      max={999}
-                      inputMode="numeric"
-                    />
-                  </div>
-                  <div>
-                    <div style={styles.label}>커트라인(-X컷에서 X)</div>
-                    <input
-                      style={styles.input}
-                      value={cutMiss}
-                      onChange={(e) => setCutMiss(e.target.value)}
-                      type="number"
-                      min={0}
-                      max={999}
-                      inputMode="numeric"
-                    />
-                  </div>
-                </div>
+            <div style={{ marginTop: 12 }}>
+              <button type="button" style={styles.primaryBtn} onClick={startExam}>
+                시작하기
+              </button>
+            </div>
+          </>
+        )}
 
+        {/* 시험 */}
+        {phase === 'exam' && (
+          <div style={styles.card}>
+            <div style={styles.metaLine}>
+              <div>
+                문항 {i + 1} / {seq.length}
+              </div>
+              <div>맞춘 개수: {corrects}</div>
+            </div>
+
+            <div style={styles.term}>{seq[i]?.term_en}</div>
+            <div style={styles.timer}>남은 시간: {remaining}초</div>
+
+            <div style={{ marginTop: 14 }}>
+              <input
+                key={inputKey}
+                ref={inputRef}
+                style={styles.input}
+                placeholder="뜻을 입력하세요 (예: 달리다)"
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                onCompositionStart={() => setIsComposing(true)}
+                onCompositionEnd={(e) => {
+                  setIsComposing(false);
+                  setAnswer(e.currentTarget.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    if (isComposing) return;
+                    submitCurrent(answer);
+                  }
+                }}
+                autoCapitalize="none"
+                autoCorrect="off"
+              />
+            </div>
+
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" style={{ ...styles.primaryBtn, width: 'auto' }} onClick={() => submitCurrent(answerRef.current)}>
+                제출(Enter)
+              </button>
+              <button
+                type="button"
+                style={styles.ghostBtn}
+                onClick={() => {
+                  if (confirm('시험을 중단하고 범위 선택으로 돌아갈까요?')) nav(backToRange);
+                }}
+              >
+                중단
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 종료 & 리뷰 */}
+        {phase === 'done' && (
+          <div style={styles.card}>
+            <div style={{ fontWeight: 900, color: COLORS.text }}>결과: {passOrFail()} ✅</div>
+            <div style={{ marginTop: 6, fontWeight: 800, color: COLORS.text }}>
+              맞춘 개수: {corrects} / {seq.length} (오답: {seq.length - corrects}, 커트라인: -{cutMiss}컷)
+            </div>
+
+            {!reviewOpen ? (
+              <>
+                <div style={styles.warn}>
+                  <b>안내</b>
+                  <br />
+                  모의시험은 AI가 채점하기 때문에 오류가 있을 수 있습니다. 반드시 정답과 오답을 한번 더 숙지 후
+                  공식시험을 응시해주세요.
+                </div>
                 <div style={{ marginTop: 12 }}>
-                  <button type="button" style={styles.primaryBtn} onClick={startExam}>
-                    시작하기
+                  <button type="button" style={styles.primaryBtn} onClick={() => setReviewOpen(true)}>
+                    확인
                   </button>
                 </div>
               </>
-            )}
+            ) : (
+              <div style={styles.resultBox}>
+                <div style={{ fontWeight: 900, color: COLORS.text }}>전체 문제 리뷰 (정답/내 답/정오)</div>
 
-            {/* 시험 */}
-            {phase === 'exam' && (
-              <div style={styles.card}>
-                <div style={styles.metaLine}>
-                  <div>문항 {i + 1} / {seq.length}</div>
-                  <div>맞춘 개수: {corrects}</div>
-                </div>
-
-                <div style={styles.term}>{seq[i]?.term_en}</div>
-                <div style={styles.timer}>남은 시간: {remaining}초</div>
-
-                <div style={{ marginTop: 14 }}>
-                  <input
-                    key={inputKey}
-                    ref={inputRef}
-                    style={styles.input}
-                    placeholder="뜻을 입력하세요 (예: 달리다)"
-                    value={answer}
-                    onChange={(e) => setAnswer(e.target.value)}
-                    onCompositionStart={() => setIsComposing(true)}
-                    onCompositionEnd={(e) => {
-                      setIsComposing(false);
-                      setAnswer(e.currentTarget.value);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        if (isComposing) return;
-                        submitCurrent(answer);
-                      }
-                    }}
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                  />
-                </div>
-
-                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button type="button" style={styles.primaryBtn} onClick={() => submitCurrent(answerRef.current)}>
-                    제출(Enter)
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.ghostBtn}
-                    onClick={() => {
-                      // 중간에 나가면 실수 방지용 안내
-                      if (confirm('시험을 중단하고 범위 선택으로 돌아갈까요?')) nav('/study');
-                    }}
-                  >
-                    중단
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 종료 & 리뷰 */}
-            {phase === 'done' && (
-              <div style={styles.card}>
-                <div style={{ fontWeight: 900, color: COLORS.text }}>
-                  결과: {passOrFail()} ✅
-                </div>
-                <div style={{ marginTop: 6, fontWeight: 800, color: COLORS.text }}>
-                  맞춘 개수: {corrects} / {seq.length} (오답: {seq.length - corrects}, 커트라인: -{cutMiss}컷)
-                </div>
-
-                {!reviewOpen ? (
-                  <>
-                    <div style={styles.warn}>
-                      <b>안내</b><br />
-                      모의시험은 AI가 채점하기 때문에 오류가 있을 수 있습니다. 반드시 정답과 오답을 한번 더 숙지 후 공식시험을 응시해주세요.
+                {results.map((r, idx) => (
+                  <div key={idx} style={styles.item}>
+                    <div style={{ color: COLORS.text, fontWeight: 900 }}>
+                      {idx + 1}. {r.word.term_en} —{' '}
+                      {r.ok ? <span style={styles.ok}>정답</span> : <span style={styles.nok}>오답</span>}
+                      {r.word?.book && (
+                        <span style={{ marginLeft: 8, fontSize: 12, color: COLORS.sub, fontWeight: 700 }}>
+                          ({r.word.book}
+                          {Number.isFinite(Number(r.word.chapter)) ? ` ${r.word.chapter}강` : ''})
+                        </span>
+                      )}
                     </div>
-                    <div style={{ marginTop: 12 }}>
-                      <button type="button" style={styles.primaryBtn} onClick={() => setReviewOpen(true)}>
-                        확인
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div style={styles.resultBox}>
-                    <div style={{ fontWeight: 900, color: COLORS.text }}>
-                      전체 문제 리뷰 (정답/내 답/정오)
-                    </div>
-
-                    {results.map((r, idx) => (
-                      <div key={idx} style={styles.item}>
-                        <div style={{ color: COLORS.text, fontWeight: 900 }}>
-                          {idx + 1}. {r.word.term_en}{' '}
-                          — {r.ok ? <span style={styles.ok}>정답</span> : <span style={styles.nok}>오답</span>}
-                          {r.word?.book && (
-                            <span style={{ marginLeft: 8, fontSize: 12, color: COLORS.sub, fontWeight: 700 }}>
-                              ({r.word.book}
-                              {Number.isFinite(Number(r.word.chapter)) ? ` ${r.word.chapter}강` : ''})
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ marginTop: 4, fontWeight: 800, color: COLORS.text }}>
-                          정답: {r.word.meaning_ko}
-                        </div>
-                        <div style={{ fontWeight: 800, color: COLORS.text }}>
-                          내 답: {r.your || '(무응답)'}
-                        </div>
-                      </div>
-                    ))}
-
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-                      <button type="button" style={styles.primaryBtn} onClick={() => nav('/study')}>
-                        범위 다시 고르기
-                      </button>
-                      <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>
-                        대시보드로
-                      </button>
-                    </div>
+                    <div style={{ marginTop: 4, fontWeight: 800, color: COLORS.text }}>정답: {r.word.meaning_ko}</div>
+                    <div style={{ fontWeight: 800, color: COLORS.text }}>내 답: {r.your || '(무응답)'}</div>
                   </div>
-                )}
+                ))}
+
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+                  <button type="button" style={{ ...styles.primaryBtn, width: 'auto' }} onClick={() => nav(backToRange)}>
+                    범위 다시 고르기
+                  </button>
+                  <button type="button" style={styles.ghostBtn} onClick={() => nav('/dashboard')}>
+                    대시보드로
+                  </button>
+                </div>
               </div>
             )}
           </div>
-        </div>
+        )}
       </div>
     </StudentShell>
   );
