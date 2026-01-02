@@ -11,7 +11,6 @@ dayjs.locale("ko");
 
 const COLORS = {
   bg: "#fff5f8",
-  card: "#ffffff",
   text: "#1f2a44",
   sub: "#5d6b82",
   border: "#ffd3e3",
@@ -36,39 +35,26 @@ export default function OfficialResultPage() {
 
   const styles = useMemo(
     () => ({
-      // ✅ 풀스크린 + 중앙정렬 (흰 네모 래퍼 제거)
-      pageWrap: {
+      // ✅ 화면 전체 사용 (중앙 네모 래퍼 제거)
+      page: {
         minHeight: "100dvh",
         width: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        paddingTop: "calc(env(safe-area-inset-top, 0px) + 16px)",
-        paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+        background: COLORS.bg,
+        paddingTop: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 14px)",
         paddingLeft: 16,
         paddingRight: 16,
-        background: COLORS.bg,
         color: COLORS.text,
       },
       container: {
         width: "100%",
-        maxWidth: 860,
-      },
-
-      // 상단 헤더 패널(반투명)
-      headBar: {
-        border: `1px solid ${COLORS.border}`,
-        borderRadius: 16,
-        padding: 14,
-        background: "rgba(255,255,255,0.35)",
-        backdropFilter: "blur(6px)",
-        boxShadow: "0 10px 24px rgba(255,111,163,.08)",
-        width: "100%",
+        maxWidth: 980,
+        margin: "0 auto",
       },
 
       headRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 },
       title: { fontSize: 18, fontWeight: 900, margin: 0, color: COLORS.text },
-      sub: { fontSize: 12, color: COLORS.sub, marginTop: 2, fontWeight: 800 },
+      sub: { fontSize: 12, color: COLORS.sub, marginTop: 3, fontWeight: 900 },
 
       pill: (ok) => ({
         display: "inline-flex",
@@ -84,7 +70,7 @@ export default function OfficialResultPage() {
         whiteSpace: "nowrap",
       }),
 
-      // 요약 메타 패널(반투명)
+      // ✅ 요약 메타 (섹션 카드)
       metaGrid: {
         marginTop: 12,
         border: `1px solid ${COLORS.gray}`,
@@ -92,28 +78,24 @@ export default function OfficialResultPage() {
         padding: 12,
         background: "rgba(255,255,255,0.55)",
         backdropFilter: "blur(6px)",
-        boxShadow: "0 10px 24px rgba(31,42,68,0.06)",
+        boxShadow: "0 10px 22px rgba(31,42,68,0.06)",
         display: "grid",
         gridTemplateColumns: "1fr 1fr",
         gap: 10,
       },
       metaItem: { display: "flex", flexDirection: "column", gap: 3, minWidth: 0 },
       metaLabel: { fontSize: 12, color: COLORS.sub, fontWeight: 900 },
+      // ✅ 줄바꿈 허용 (범위/책 긴 경우 잘림 방지)
       metaValue: {
         fontSize: 13,
         color: COLORS.text,
         fontWeight: 900,
         lineHeight: 1.25,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
+        whiteSpace: "normal",
+        wordBreak: "break-word",
       },
 
-      section: {
-        marginTop: 12,
-        borderTop: `1px dashed ${COLORS.border}`,
-        paddingTop: 12,
-      },
+      section: { marginTop: 12, borderTop: `1px dashed ${COLORS.border}`, paddingTop: 12 },
       sectionTitle: { fontSize: 14, fontWeight: 900, color: COLORS.text, marginBottom: 8 },
 
       empty: {
@@ -124,7 +106,7 @@ export default function OfficialResultPage() {
         backdropFilter: "blur(6px)",
         color: COLORS.sub,
         fontWeight: 900,
-        boxShadow: "0 10px 24px rgba(31,42,68,0.05)",
+        boxShadow: "0 10px 22px rgba(31,42,68,0.05)",
       },
 
       wrongCard: {
@@ -134,26 +116,31 @@ export default function OfficialResultPage() {
         border: `1px solid ${COLORS.gray}`,
         background: "rgba(255,255,255,0.55)",
         backdropFilter: "blur(6px)",
-        boxShadow: "0 10px 24px rgba(31,42,68,0.05)",
+        boxShadow: "0 10px 22px rgba(31,42,68,0.05)",
       },
-      wrongTop: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 },
+      wrongTop: {
+        display: "grid",
+        gridTemplateColumns: "auto 1fr",
+        alignItems: "center",
+        gap: 10,
+      },
       wrongIdx: { fontSize: 12, color: COLORS.sub, fontWeight: 900, whiteSpace: "nowrap" },
+      // ✅ 단어도 줄바꿈 가능하게 (긴 단어/표현 대비)
       wrongTerm: {
         fontSize: 14,
         fontWeight: 900,
         color: COLORS.text,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
         minWidth: 0,
-        flex: 1,
         textAlign: "right",
+        whiteSpace: "normal",
+        wordBreak: "break-word",
+        lineHeight: 1.25,
       },
-      wrongLine: { marginTop: 6, fontSize: 13, fontWeight: 900, color: COLORS.text },
-      wrongSub: { marginTop: 2, fontSize: 12, fontWeight: 900, color: COLORS.sub },
+      wrongLine: { marginTop: 6, fontSize: 13, fontWeight: 900, color: COLORS.text, wordBreak: "break-word" },
+      wrongSub: { marginTop: 2, fontSize: 12, fontWeight: 900, color: COLORS.sub, wordBreak: "break-word" },
 
       bottomLink: {
-        marginTop: 12,
+        marginTop: 14,
         color: COLORS.blue,
         fontWeight: 900,
         display: "inline-block",
@@ -220,11 +207,9 @@ export default function OfficialResultPage() {
   if (loading) {
     return (
       <StudentShell>
-        <div style={styles.pageWrap}>
+        <div style={styles.page}>
           <div style={styles.container}>
-            <div style={styles.headBar}>
-              <div style={styles.loadingText}>불러오는 중…</div>
-            </div>
+            <div style={styles.loadingText}>불러오는 중…</div>
           </div>
         </div>
       </StudentShell>
@@ -238,82 +223,73 @@ export default function OfficialResultPage() {
   const wrong = Math.max(0, total - score);
 
   const wrongItems = (items || []).filter((it) => it?.final_ok === false || it?.final_ok === null);
-
   const confirmedAt = sess.teacher_confirmed_at || sess.created_at;
 
   return (
     <StudentShell>
-      <div style={styles.pageWrap}>
+      <div style={styles.page}>
         <div style={styles.container}>
-          <div style={styles.headBar}>
-            {/* 헤더 */}
-            <div style={styles.headRow}>
-              <div>
-                <h2 style={styles.title}>공식시험 상세 결과</h2>
-                <div style={styles.sub}>{dayjs(confirmedAt).format("YYYY.MM.DD HH:mm")} · 검수 확정</div>
-              </div>
-
-              <span style={styles.pill(!!sess.final_pass)}>{sess.final_pass ? "통과" : "불통과"}</span>
+          {/* 헤더 (✅ 큰 네모 패널 없음, 그냥 페이지 상단) */}
+          <div style={styles.headRow}>
+            <div>
+              <h2 style={styles.title}>공식시험 상세 결과</h2>
+              <div style={styles.sub}>{dayjs(confirmedAt).format("YYYY.MM.DD HH:mm")} · 검수 확정</div>
             </div>
 
-            {/* 요약 메타 */}
-            <div style={styles.metaGrid}>
-              <div style={styles.metaItem}>
-                <div style={styles.metaLabel}>책</div>
-                <div style={styles.metaValue} title={sess.book || ""}>
-                  {sess.book || "-"}
-                </div>
-              </div>
-
-              <div style={styles.metaItem}>
-                <div style={styles.metaLabel}>범위</div>
-                <div style={styles.metaValue} title={range || ""}>
-                  {range}
-                </div>
-              </div>
-
-              <div style={styles.metaItem}>
-                <div style={styles.metaLabel}>문제 수</div>
-                <div style={styles.metaValue}>{total}문제</div>
-              </div>
-
-              <div style={styles.metaItem}>
-                <div style={styles.metaLabel}>틀린 수 / 커트라인</div>
-                <div style={styles.metaValue}>
-                  -{wrong} · -{sess.cutoff_miss ?? 0}컷
-                </div>
-              </div>
-            </div>
-
-            {/* 오답 섹션 */}
-            <div style={styles.section}>
-              <div style={styles.sectionTitle}>틀린 문제</div>
-
-              {wrongItems.length === 0 ? (
-                <div style={styles.empty}>틀린 문제가 없습니다. 🎉</div>
-              ) : (
-                <div>
-                  {wrongItems.map((it) => (
-                    <div key={it.order_index} style={styles.wrongCard}>
-                      <div style={styles.wrongTop}>
-                        <div style={styles.wrongIdx}>{it.order_index}번</div>
-                        <div style={styles.wrongTerm} title={it.term_en || ""}>
-                          {it.term_en || "-"}
-                        </div>
-                      </div>
-
-                      <div style={styles.wrongLine}>정답: {it.meaning_ko || "-"}</div>
-                      <div style={styles.wrongSub}>내 답: {it.student_answer ? it.student_answer : "(무응답)"}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <Link to="/exam/official/results" style={styles.bottomLink}>
-              ← 결과 목록
-            </Link>
+            <span style={styles.pill(!!sess.final_pass)}>{sess.final_pass ? "통과" : "불통과"}</span>
           </div>
+
+          {/* 요약 메타 */}
+          <div style={styles.metaGrid}>
+            <div style={styles.metaItem}>
+              <div style={styles.metaLabel}>책</div>
+              <div style={styles.metaValue}>{sess.book || "-"}</div>
+            </div>
+
+            <div style={styles.metaItem}>
+              <div style={styles.metaLabel}>범위</div>
+              <div style={styles.metaValue}>{range}</div>
+            </div>
+
+            <div style={styles.metaItem}>
+              <div style={styles.metaLabel}>문제 수</div>
+              <div style={styles.metaValue}>{total}문제</div>
+            </div>
+
+            <div style={styles.metaItem}>
+              <div style={styles.metaLabel}>틀린 수 / 커트라인</div>
+              <div style={styles.metaValue}>
+                -{wrong} · -{sess.cutoff_miss ?? 0}컷
+              </div>
+            </div>
+          </div>
+
+          {/* 오답 섹션 */}
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>틀린 문제</div>
+
+            {wrongItems.length === 0 ? (
+              <div style={styles.empty}>틀린 문제가 없습니다. 🎉</div>
+            ) : (
+              <div>
+                {wrongItems.map((it) => (
+                  <div key={it.order_index} style={styles.wrongCard}>
+                    <div style={styles.wrongTop}>
+                      <div style={styles.wrongIdx}>{it.order_index}번</div>
+                      <div style={styles.wrongTerm}>{it.term_en || "-"}</div>
+                    </div>
+
+                    <div style={styles.wrongLine}>정답: {it.meaning_ko || "-"}</div>
+                    <div style={styles.wrongSub}>내 답: {it.student_answer ? it.student_answer : "(무응답)"}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <Link to="/exam/official/results" style={styles.bottomLink}>
+            ← 결과 목록
+          </Link>
         </div>
       </div>
     </StudentShell>
