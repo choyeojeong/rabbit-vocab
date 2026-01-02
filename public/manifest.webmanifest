@@ -1,6 +1,6 @@
 {
-  "name": "Rabbit 단어앱",
-  "short_name": "Rabbit",
+  "name": "VocaRabbit",
+  "short_name": "VocaRabbit",
   "start_url": "/?source=pwa",
   "display": "standalone",
   "background_color": "#fff5f8",
@@ -15,12 +15,6 @@
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
-    },
-    {
-      "src": "/icons/maskable-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable any"
     }
   ]
 }
