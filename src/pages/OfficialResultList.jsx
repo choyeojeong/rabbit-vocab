@@ -130,11 +130,11 @@ export default function OfficialResultList() {
     },
     container: {
       width: "100%",
-      maxWidth: 980, // 너무 넓지 않게만 (데스크탑 가독성)
+      maxWidth: 980,
       margin: "0 auto",
     },
 
-    // 상단 헤더(카드 느낌 X, 그냥 블록)
+    // 상단 헤더
     header: {
       display: "flex",
       alignItems: "flex-start",
@@ -157,7 +157,7 @@ export default function OfficialResultList() {
       boxShadow: "0 10px 18px rgba(31,42,68,0.06)",
     },
 
-    // Tabs (배경만 살짝)
+    // Tabs
     tabsWrap: {
       marginTop: 8,
       border: `1px solid ${COLORS.border}`,
@@ -186,7 +186,6 @@ export default function OfficialResultList() {
     // 리스트(표 대신)
     list: { marginTop: 12, display: "grid", gap: 10 },
 
-    // ✅ 한 행 = 카드. (가로표 제거, 여러 줄로 표현)
     rowCard: {
       display: "grid",
       gridTemplateColumns: "1fr auto",
@@ -199,6 +198,7 @@ export default function OfficialResultList() {
       boxShadow: "0 10px 22px rgba(31,42,68,0.06)",
       textDecoration: "none",
       color: COLORS.text,
+      transition: "transform 0.12s ease",
     },
 
     left: { minWidth: 0 },
@@ -215,7 +215,6 @@ export default function OfficialResultList() {
     badge: (ok) => ({
       display: "inline-flex",
       alignItems: "center",
-      gap: 6,
       padding: "6px 10px",
       borderRadius: 999,
       fontSize: 12,
@@ -291,7 +290,7 @@ export default function OfficialResultList() {
       textDecoration: "none",
     },
 
-    // 로그인 필요 화면도 "네모카드" 없이
+    // 로그인 필요 화면도 카드 느낌만 최소
     authBox: {
       marginTop: 12,
       padding: 12,
@@ -407,10 +406,9 @@ export default function OfficialResultList() {
                     <div style={styles.left}>
                       <div style={styles.topLine}>
                         <div style={styles.date}>{r._dateStr}</div>
-                        <span style={styles.badge(ok)}>
-                          {ok ? "통과" : "불통과"}
-                          <span style={{ opacity: 0.75, fontWeight: 900 }}>· -{r._wrong}</span>
-                        </span>
+
+                        {/* ✅ 통과/불통과만 표시 (점/숫자 제거) */}
+                        <span style={styles.badge(ok)}>{ok ? "통과" : "불통과"}</span>
                       </div>
 
                       <div style={styles.book}>{r.book || "-"}</div>
@@ -424,12 +422,13 @@ export default function OfficialResultList() {
                         <span style={styles.chip}>
                           <span style={styles.chipSub}>문제수</span> {r._numQ}문제
                         </span>
+
+                        {/* ✅ 필요하면 틀린 수는 여기서만 보여주고, 배지 옆 숫자는 안 보여줌 */}
                         <span style={styles.chip}>
                           <span style={styles.chipSub}>틀린 수</span> -{r._wrong}
                         </span>
-                        <span style={styles.chip}>
-                          <span style={styles.chipSub}>상태</span> 검수 확정
-                        </span>
+
+                        {/* ✅ 상태(검수 확정) 칩 제거 */}
                       </div>
                     </div>
 
