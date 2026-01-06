@@ -20,7 +20,6 @@ dayjs.locale("ko");
  *
  * ⚠️ 전제
  * - wrong_book_items 테이블에 student_answer 컬럼이 존재한다고 가정합니다.
- *   (없으면 아래 select에 student_answer가 null로만 들어옵니다.)
  */
 
 const THEME = {
@@ -94,6 +93,7 @@ export default function WrongBooksAdminPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  // wrong_books 전체(또는 필터) 로드
   const [rows, setRows] = useState([]);
 
   // 학생/월 필터 + 검색
@@ -101,11 +101,11 @@ export default function WrongBooksAdminPage() {
   const [monthFilter, setMonthFilter] = useState(""); // yyyy_mm
   const [q, setQ] = useState("");
 
-  // 펼침 상태
-  const [openMap, setOpenMap] = useState(() => new Map()); // wrong_book_id -> boolean
+  // 펼침 상태 (wrong_book_id -> boolean)
+  const [openMap, setOpenMap] = useState(() => new Map());
 
-  // 아이템 캐시
-  const [itemsByBook, setItemsByBook] = useState(() => new Map()); // wrong_book_id -> { loading, err, items[] }
+  // 아이템 캐시 (wrong_book_id -> { loading, err, items[] })
+  const [itemsByBook, setItemsByBook] = useState(() => new Map());
 
   async function loadAll() {
     try {
@@ -140,6 +140,7 @@ export default function WrongBooksAdminPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [studentFilter, monthFilter]);
 
+  // 학생 옵션 (현재 wrong_books에 존재하는 학생들)
   const studentOptions = useMemo(() => {
     const map = new Map(); // id -> name
     for (const r of rows) {
@@ -152,14 +153,16 @@ export default function WrongBooksAdminPage() {
     return arr;
   }, [rows]);
 
+  // 월 옵션(필터)
   const monthOptions = useMemo(() => {
     const set = new Set();
     for (const r of rows) set.add(r.yyyy_mm || "기타");
     const arr = Array.from(set).filter(Boolean);
-    arr.sort((a, b) => (b || "").localeCompare(a || ""));
+    arr.sort((a, b) => (b || "").localeCompare(a || "")); // 최근월 우선
     return arr;
   }, [rows]);
 
+  // 검색 적용(프론트)
   const filteredRows = useMemo(() => {
     const text = (q || "").trim().toLowerCase();
     if (!text) return rows;
@@ -199,7 +202,9 @@ export default function WrongBooksAdminPage() {
     );
 
     for (const s of students) {
-      const monthKeys = Array.from(s.months.keys()).sort((a, b) => (b || "").localeCompare(a || ""));
+      const monthKeys = Array.from(s.months.keys()).sort((a, b) =>
+        (b || "").localeCompare(a || "")
+      );
       const newMonths = new Map();
       for (const mk of monthKeys) {
         const arr = s.months.get(mk) || [];
@@ -239,9 +244,7 @@ export default function WrongBooksAdminPage() {
       // ✅ accepted_ko 제거 + student_answer 추가
       const { data, error } = await supabase
         .from("wrong_book_items")
-        .select(
-          "id, wrong_book_id, word_id, term_en, meaning_ko, pos, student_answer, created_at"
-        )
+        .select("id, wrong_book_id, word_id, term_en, meaning_ko, pos, student_answer, created_at")
         .eq("wrong_book_id", wrongBookId)
         .order("created_at", { ascending: true });
 
@@ -298,18 +301,18 @@ export default function WrongBooksAdminPage() {
           </div>
 
           {/* 에러 */}
-          {err && (
-            <div style={styles.errBox}>
-              {err}
-            </div>
-          )}
+          {err && <div style={styles.errBox}>{err}</div>}
 
           {/* 필터 */}
           <div style={styles.filterCard}>
             <div className="_wb_filterGrid" style={styles.filterGrid}>
               <div>
                 <div style={labelStyle}>학생 필터</div>
-                <select value={studentFilter} onChange={(e) => setStudentFilter(e.target.value)} style={inputStyle}>
+                <select
+                  value={studentFilter}
+                  onChange={(e) => setStudentFilter(e.target.value)}
+                  style={inputStyle}
+                >
                   <option value="">(전체 학생)</option>
                   {studentOptions.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -321,7 +324,11 @@ export default function WrongBooksAdminPage() {
 
               <div>
                 <div style={labelStyle}>월 필터</div>
-                <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} style={inputStyle}>
+                <select
+                  value={monthFilter}
+                  onChange={(e) => setMonthFilter(e.target.value)}
+                  style={inputStyle}
+                >
                   <option value="">(전체 월)</option>
                   {monthOptions.map((m) => (
                     <option key={m} value={m}>
@@ -345,7 +352,15 @@ export default function WrongBooksAdminPage() {
               </div>
             </div>
 
-            <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <div
+              style={{
+                marginTop: 10,
+                display: "flex",
+                gap: 10,
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
               <button
                 style={btnBase}
                 onClick={() => {
@@ -397,7 +412,13 @@ export default function WrongBooksAdminPage() {
                           const cnt = Array.isArray(cache?.items) ? cache.items.length : null;
 
                           return (
-                            <div key={r.id} style={{ ...styles.bookCard, background: opened ? THEME.pinkSoft : "#fff" }}>
+                            <div
+                              key={r.id}
+                              style={{
+                                ...styles.bookCard,
+                                background: opened ? THEME.pinkSoft : "#fff",
+                              }}
+                            >
                               <button
                                 type="button"
                                 onClick={() => onClickBook(r)}
@@ -429,11 +450,15 @@ export default function WrongBooksAdminPage() {
                                   {cache?.loading ? (
                                     <div style={styles.stateText}>단어 불러오는 중…</div>
                                   ) : cache?.err ? (
-                                    <div style={{ ...styles.stateText, color: THEME.danger }}>{cache.err}</div>
+                                    <div style={{ ...styles.stateText, color: THEME.danger }}>
+                                      {cache.err}
+                                    </div>
                                   ) : (
                                     <div style={{ display: "grid", gap: 8 }}>
                                       {(cache?.items || []).length === 0 ? (
-                                        <div style={styles.stateText}>이 파일에 저장된 오답 단어가 없습니다.</div>
+                                        <div style={styles.stateText}>
+                                          이 파일에 저장된 오답 단어가 없습니다.
+                                        </div>
                                       ) : (
                                         <>
                                           <div style={styles.smallHint}>
@@ -455,14 +480,20 @@ export default function WrongBooksAdminPage() {
                                                 <div style={styles.itemBody}>
                                                   <div style={styles.itemLine}>
                                                     <b>정답(ko):</b>{" "}
-                                                    {it.meaning_ko ? it.meaning_ko : <span style={{ color: THEME.sub }}>—</span>}
+                                                    {it.meaning_ko ? (
+                                                      it.meaning_ko
+                                                    ) : (
+                                                      <span style={{ color: THEME.sub }}>—</span>
+                                                    )}
                                                   </div>
 
                                                   {/* ✅ 허용단어 제거 → 학생 오답 표시 */}
                                                   <div style={{ ...styles.itemLine, marginTop: 4 }}>
                                                     <b>학생 오답:</b>{" "}
                                                     {it.student_answer ? (
-                                                      <span style={{ color: THEME.text }}>{String(it.student_answer)}</span>
+                                                      <span style={{ color: THEME.text }}>
+                                                        {String(it.student_answer)}
+                                                      </span>
                                                     ) : (
                                                       <span style={{ color: THEME.sub }}>—</span>
                                                     )}
@@ -490,7 +521,8 @@ export default function WrongBooksAdminPage() {
         )}
 
         <div style={styles.footerNote}>
-          ※ 오답 파일은 <b style={{ color: THEME.text }}>공식시험 검수 “최종 확정”</b> 시점에 자동 생성되는 구조입니다.
+          ※ 오답 파일은 <b style={{ color: THEME.text }}>공식시험 검수 “최종 확정”</b> 시점에 자동
+          생성되는 구조입니다.
         </div>
       </div>
 

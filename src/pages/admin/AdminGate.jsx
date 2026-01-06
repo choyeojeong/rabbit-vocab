@@ -367,31 +367,27 @@ export default function AdminGate() {
   };
 
   // ✅ iPhone safe-area 대응: top/bottom inset 포함한 위치 계산
-  // - Safari에서 env()는 스타일 문자열로 그대로 넣어야 함
-  const TOP = "calc(env(safe-area-inset-top, 0px) + 10px)";
+  // ✅ "좀 더 아래로" 내리기 위해 +16px 로 여유 증가(기존 +10px)
+  const TOP = "calc(env(safe-area-inset-top, 0px) + 16px)";
   const RIGHT = "calc(env(safe-area-inset-right, 0px) + 12px)";
   const LEFT = "calc(env(safe-area-inset-left, 0px) + 12px)";
   const BOTTOM = "calc(env(safe-area-inset-bottom, 0px) + 16px)";
 
   // ✅ 상단 fixed 영역 때문에 Outlet이 가려지지 않게 padding-top 확보
-  // 버튼 높이 + 여유 + safe-area-top
+  // - 오른쪽 컨트롤이 2줄로 내려가도 덜 겹치게 모바일은 더 넉넉히 잡음
   const contentPadTop = isMobile
-    ? `calc(env(safe-area-inset-top, 0px) + ${BTN_H}px + 22px)`
-    : `calc(env(safe-area-inset-top, 0px) + 56px)`;
+    ? `calc(env(safe-area-inset-top, 0px) + ${BTN_H}px + 70px)`
+    : `calc(env(safe-area-inset-top, 0px) + 64px)`;
 
   return (
     <>
-      {/* ✅ AdminGate가 감싸는 전역 UI 톤: 배경/기본 글자색 강제 */}
       <div
         style={{
-          // ✅ iOS Safari 주소창 변화 대응: 100dvh 우선, 미지원 브라우저는 100vh
           minHeight: "100vh",
           height: "100dvh",
           background: THEME.bg,
           color: THEME.text,
-          // ✅ fixed 상단 UI에 가려지지 않게
           paddingTop: contentPadTop,
-          // ✅ iOS 탄성 스크롤 시 배경 하얗게 비는 느낌 최소화
           WebkitOverflowScrolling: "touch",
         }}
       >
@@ -424,7 +420,6 @@ export default function AdminGate() {
             gap: 8,
             alignItems: "center",
             flexWrap: "wrap",
-            // ✅ 모바일에서 우측 컨트롤이 너무 길면 아래로 떨어질 수 있게
             maxWidth: "min(520px, calc(100vw - 24px))",
             justifyContent: "flex-end",
           }}
@@ -473,7 +468,9 @@ export default function AdminGate() {
               right: RIGHT,
               bottom: BOTTOM,
               zIndex: 99999,
-              width: isMobile ? "min(420px, calc(100vw - 24px))" : "min(360px, calc(100vw - 32px))",
+              width: isMobile
+                ? "min(420px, calc(100vw - 24px))"
+                : "min(360px, calc(100vw - 32px))",
               background: THEME.card,
               color: THEME.text,
               border: "1px solid #ffd3e3",
@@ -503,7 +500,7 @@ export default function AdminGate() {
                   cursor: "pointer",
                   fontSize: 18,
                   lineHeight: "18px",
-                  padding: 6, // ✅ 모바일에서 누르기 쉬움
+                  padding: 6,
                   color: "#6b7280",
                   WebkitTapHighlightColor: "transparent",
                   touchAction: "manipulation",
@@ -546,7 +543,6 @@ export default function AdminGate() {
               </button>
             </div>
 
-            {/* detail 미리보기 */}
             {toast?.row?.detail && (
               <div
                 style={{
