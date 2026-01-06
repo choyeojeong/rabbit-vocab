@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../../utils/supabaseClient";
 
@@ -18,9 +18,11 @@ import { supabase } from "../../utils/supabaseClient";
  * - 왼쪽 상단 "← 뒤로" 버튼 (history 없으면 /dashboard로)
  * - /dashboard에서는 버튼 숨김(원하면 아래 hideBack 로직 제거 가능)
  *
- * ✅ UI 색상 정리(중요)
- * - AdminGate가 감싸는 모든 관리자 페이지에 기본 배경/기본 글자색을 강제 적용
- * - "흰 배경 + 흰 글씨" 같은 대비 문제를 전역에서 1차로 차단
+ * ✅ 모바일(iPhone) 최적화
+ * - 100vh 대신 100dvh 사용 (Safari 주소창 높이 변화 대응)
+ * - 상단/하단 fixed UI에 safe-area inset 적용 (노치/홈바)
+ * - fixed 상단 UI 때문에 Outlet이 가려지지 않게 top padding 확보
+ * - 모바일에서 버튼 터치 타겟(44px+)로 확대
  */
 
 // --- WebAudio 딩 사운드 (짧게) ---
@@ -56,7 +58,7 @@ function playDing() {
   }
 }
 
-// ✅ 관리자 기본 톤(여기만 바꿔도 전체 페이지 대비가 확 좋아짐)
+// ✅ 관리자 기본 톤
 const THEME = {
   bg: "#f7f9fc",
   card: "#ffffff",
@@ -68,62 +70,6 @@ const THEME = {
   danger: "#b00020",
 };
 
-const ui = {
-  pillBtn: {
-    height: 34,
-    padding: "0 12px",
-    borderRadius: 999,
-    fontWeight: 900,
-    cursor: "pointer",
-    boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-    // ✅ 기본 글자색을 확실히 잡아 “흰 글씨” 사고 방지
-    color: THEME.text,
-    background: THEME.card,
-    border: `1px solid ${THEME.border}`,
-  },
-  dangerPill: {
-    height: 34,
-    padding: "0 12px",
-    borderRadius: 999,
-    fontWeight: 900,
-    cursor: "pointer",
-    boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-    color: THEME.text,
-    background: THEME.card,
-    border: "1px solid #ffd3e3",
-  },
-  toastBtnPrimary: {
-    border: "none",
-    background: THEME.pink,
-    color: "#fff",
-    fontWeight: 800,
-    padding: "8px 10px",
-    borderRadius: 10,
-    cursor: "pointer",
-    fontSize: 13,
-  },
-  toastBtnSecondary: {
-    border: "1px solid #ffd3e3",
-    background: THEME.pinkSoft,
-    color: THEME.danger,
-    fontWeight: 800,
-    padding: "8px 10px",
-    borderRadius: 10,
-    cursor: "pointer",
-    fontSize: 13,
-  },
-  toastBtnNeutral: {
-    border: "1px solid #eee",
-    background: "#f7f7f7",
-    color: "#374151",
-    fontWeight: 800,
-    padding: "8px 10px",
-    borderRadius: 10,
-    cursor: "pointer",
-    fontSize: 13,
-  },
-};
-
 export default function AdminGate() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -133,6 +79,12 @@ export default function AdminGate() {
   if (role !== "admin") {
     return <Navigate to="/" replace />;
   }
+
+  // ✅ iPhone 기준 모바일 최적화: 폭 기준으로 UI 스케일 조절
+  const isMobile = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia && window.matchMedia("(max-width: 520px)").matches;
+  }, []);
 
   // ✅ 왼쪽 상단 뒤로가기 버튼
   const hideBack = location?.pathname === "/dashboard";
@@ -342,14 +294,105 @@ export default function AdminGate() {
     }
   }
 
+  // ✅ 모바일에서 터치 타겟 키우기(44px+)
+  const BTN_H = isMobile ? 44 : 34;
+  const BTN_PAD = isMobile ? "0 14px" : "0 12px";
+
+  const ui = {
+    pillBtn: {
+      height: BTN_H,
+      padding: BTN_PAD,
+      borderRadius: 999,
+      fontWeight: 900,
+      cursor: "pointer",
+      boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+      color: THEME.text,
+      background: THEME.card,
+      border: `1px solid ${THEME.border}`,
+      WebkitTapHighlightColor: "transparent",
+      touchAction: "manipulation",
+    },
+    dangerPill: {
+      height: BTN_H,
+      padding: BTN_PAD,
+      borderRadius: 999,
+      fontWeight: 900,
+      cursor: "pointer",
+      boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+      color: THEME.text,
+      background: THEME.card,
+      border: "1px solid #ffd3e3",
+      WebkitTapHighlightColor: "transparent",
+      touchAction: "manipulation",
+    },
+    toastBtnPrimary: {
+      border: "none",
+      background: THEME.pink,
+      color: "#fff",
+      fontWeight: 800,
+      padding: isMobile ? "10px 12px" : "8px 10px",
+      borderRadius: 10,
+      cursor: "pointer",
+      fontSize: 13,
+      WebkitTapHighlightColor: "transparent",
+      touchAction: "manipulation",
+      minHeight: 40,
+    },
+    toastBtnSecondary: {
+      border: "1px solid #ffd3e3",
+      background: THEME.pinkSoft,
+      color: THEME.danger,
+      fontWeight: 800,
+      padding: isMobile ? "10px 12px" : "8px 10px",
+      borderRadius: 10,
+      cursor: "pointer",
+      fontSize: 13,
+      WebkitTapHighlightColor: "transparent",
+      touchAction: "manipulation",
+      minHeight: 40,
+    },
+    toastBtnNeutral: {
+      border: "1px solid #eee",
+      background: "#f7f7f7",
+      color: "#374151",
+      fontWeight: 800,
+      padding: isMobile ? "10px 12px" : "8px 10px",
+      borderRadius: 10,
+      cursor: "pointer",
+      fontSize: 13,
+      WebkitTapHighlightColor: "transparent",
+      touchAction: "manipulation",
+      minHeight: 40,
+    },
+  };
+
+  // ✅ iPhone safe-area 대응: top/bottom inset 포함한 위치 계산
+  // - Safari에서 env()는 스타일 문자열로 그대로 넣어야 함
+  const TOP = "calc(env(safe-area-inset-top, 0px) + 10px)";
+  const RIGHT = "calc(env(safe-area-inset-right, 0px) + 12px)";
+  const LEFT = "calc(env(safe-area-inset-left, 0px) + 12px)";
+  const BOTTOM = "calc(env(safe-area-inset-bottom, 0px) + 16px)";
+
+  // ✅ 상단 fixed 영역 때문에 Outlet이 가려지지 않게 padding-top 확보
+  // 버튼 높이 + 여유 + safe-area-top
+  const contentPadTop = isMobile
+    ? `calc(env(safe-area-inset-top, 0px) + ${BTN_H}px + 22px)`
+    : `calc(env(safe-area-inset-top, 0px) + 56px)`;
+
   return (
     <>
       {/* ✅ AdminGate가 감싸는 전역 UI 톤: 배경/기본 글자색 강제 */}
       <div
         style={{
+          // ✅ iOS Safari 주소창 변화 대응: 100dvh 우선, 미지원 브라우저는 100vh
           minHeight: "100vh",
+          height: "100dvh",
           background: THEME.bg,
-          color: THEME.text, // ✅ 기본 글자색(중요)
+          color: THEME.text,
+          // ✅ fixed 상단 UI에 가려지지 않게
+          paddingTop: contentPadTop,
+          // ✅ iOS 탄성 스크롤 시 배경 하얗게 비는 느낌 최소화
+          WebkitOverflowScrolling: "touch",
         }}
       >
         {/* ✅ 왼쪽 상단 뒤로가기 */}
@@ -359,8 +402,8 @@ export default function AdminGate() {
             style={{
               ...ui.pillBtn,
               position: "fixed",
-              top: 10,
-              left: 12,
+              top: TOP,
+              left: LEFT,
               zIndex: 99998,
             }}
             title="뒤로가기"
@@ -374,20 +417,21 @@ export default function AdminGate() {
         <div
           style={{
             position: "fixed",
-            top: 10,
-            right: 12,
+            top: TOP,
+            right: RIGHT,
             zIndex: 99998,
             display: "flex",
             gap: 8,
             alignItems: "center",
             flexWrap: "wrap",
+            // ✅ 모바일에서 우측 컨트롤이 너무 길면 아래로 떨어질 수 있게
+            maxWidth: "min(520px, calc(100vw - 24px))",
+            justifyContent: "flex-end",
           }}
         >
           <button
             onClick={unlockAudioOnce}
-            style={{
-              ...ui.dangerPill,
-            }}
+            style={ui.dangerPill}
             title="브라우저 정책 때문에 알림 소리는 한 번 클릭으로 활성화가 필요해요."
           >
             {audioUnlocked ? "🔊 소리 켜짐" : "🔊 소리 켜기(한번)"}
@@ -401,15 +445,17 @@ export default function AdminGate() {
               if (next && audioUnlocked) playDing();
             }}
             style={{
-              height: 34,
-              padding: "0 12px",
+              height: BTN_H,
+              padding: BTN_PAD,
               borderRadius: 999,
               border: "none",
               background: soundEnabled ? THEME.pink : "#f0f0f0",
-              color: soundEnabled ? "#fff" : THEME.text, // ✅ 꺼짐일 때 글자색 확실히
+              color: soundEnabled ? "#fff" : THEME.text,
               fontWeight: 900,
               cursor: "pointer",
               boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+              WebkitTapHighlightColor: "transparent",
+              touchAction: "manipulation",
             }}
             title="알림 소리 on/off"
           >
@@ -424,12 +470,12 @@ export default function AdminGate() {
           <div
             style={{
               position: "fixed",
-              right: 16,
-              bottom: 16,
+              right: RIGHT,
+              bottom: BOTTOM,
               zIndex: 99999,
-              width: "min(360px, calc(100vw - 32px))",
+              width: isMobile ? "min(420px, calc(100vw - 24px))" : "min(360px, calc(100vw - 32px))",
               background: THEME.card,
-              color: THEME.text, // ✅ 토스트 글자색 강제(중요)
+              color: THEME.text,
               border: "1px solid #ffd3e3",
               borderRadius: 12,
               boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
@@ -455,10 +501,12 @@ export default function AdminGate() {
                   border: "none",
                   background: "transparent",
                   cursor: "pointer",
-                  fontSize: 16,
-                  lineHeight: "16px",
-                  padding: 2,
-                  color: "#6b7280", // ✅ 회색
+                  fontSize: 18,
+                  lineHeight: "18px",
+                  padding: 6, // ✅ 모바일에서 누르기 쉬움
+                  color: "#6b7280",
+                  WebkitTapHighlightColor: "transparent",
+                  touchAction: "manipulation",
                 }}
                 aria-label="닫기"
                 title="닫기"
