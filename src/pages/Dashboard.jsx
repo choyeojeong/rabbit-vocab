@@ -108,23 +108,11 @@ export default function Dashboard() {
                     오답노트(학생별)
                   </button>
 
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/admin/book-categories")}
-                  >
-                    단어책 분류 관리(대/중/소)
-                  </button>
-
-                  <button
-                    className="student-button"
-                    onClick={() => navigate("/admin/book-categorize")}
-                  >
-                    단어책 분류 지정(책 ↔ 소분류)
-                  </button>
+                  {/* ✅ BookCategorizePage / BookCategoryManagePage 삭제했으므로 대시보드에서도 제거 */}
                 </div>
 
                 <div className="student-text" style={{ color: "#777", marginTop: 12 }}>
-                  관리자 모드에서는 학생관리/검수/모니터/CSV/오답노트/단어책 분류 페이지로 바로 이동할 수 있어요.
+                  관리자 모드에서는 학생관리/검수/모니터/CSV/오답노트 페이지로 바로 이동할 수 있어요.
                 </div>
               </>
             ) : (

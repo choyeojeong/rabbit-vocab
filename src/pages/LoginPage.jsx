@@ -31,7 +31,7 @@ const styles = {
   // ✅ 추가: 우측 상단 "앱 설치" 버튼
   installBtn: {
     position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 10px)',
+    top: 'calc(env(safe-area-inset-top, 0px) + 18px)',
     right: 12,
     zIndex: 99990,
     height: 34,

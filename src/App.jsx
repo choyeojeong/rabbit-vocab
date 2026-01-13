@@ -39,10 +39,6 @@ import CsvBatchListPage from "./pages/admin/CsvBatchListPage";
 // ✅ 관리자 게이트
 import AdminGate from "./pages/admin/AdminGate";
 
-// ✅ 단어책 분류(신규)
-import BookCategoryManagePage from "./pages/admin/BookCategoryManagePage";
-import BookCategorizePage from "./pages/admin/BookCategorizePage";
-
 // ✅ (추가) 관리자 오답노트(학생별/월별) 페이지
 import WrongBooksAdminPage from "./pages/admin/WrongBooksAdminPage";
 
@@ -153,11 +149,7 @@ function OfficialEntryGate() {
   useEffect(() => {
     const raw = loc.state?.wrong_book_ids;
 
-    const wrongIds = Array.isArray(raw)
-      ? raw
-      : raw
-      ? [raw]
-      : [];
+    const wrongIds = Array.isArray(raw) ? raw : raw ? [raw] : [];
 
     const cleaned = wrongIds.filter(Boolean);
 
@@ -288,16 +280,10 @@ export default function App() {
           <Route path="/teacher/wrongs" element={<WrongBooksAdminPage />} />
           <Route path="/admin/wrongs" element={<WrongBooksAdminPage />} />
 
-          {/* ✅ 단어책 분류(신규) */}
-          <Route path="/teacher/book-categories" element={<BookCategoryManagePage />} />
-          <Route path="/teacher/book-categorize" element={<BookCategorizePage />} />
-
           {/* admin alias */}
           <Route path="/admin/users" element={<TeacherManagePage />} />
           <Route path="/admin/csv" element={<CsvManagePage />} />
           <Route path="/admin/csv/batches" element={<CsvBatchListPage />} />
-          <Route path="/admin/book-categories" element={<BookCategoryManagePage />} />
-          <Route path="/admin/book-categorize" element={<BookCategorizePage />} />
         </Route>
 
         {/* fallback */}

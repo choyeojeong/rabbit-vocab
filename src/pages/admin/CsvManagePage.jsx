@@ -926,7 +926,9 @@ export default function CsvManagePage() {
             </div>
           </div>
 
-          {hasChildren && expanded && <div style={{ marginTop: 6 }}>{renderTree(n.children, depth + 1)}</div>}
+          {hasChildren && expanded && (
+            <div style={{ marginTop: 6 }}>{renderTree(n.children, depth + 1)}</div>
+          )}
         </div>
       );
     });
@@ -949,7 +951,9 @@ export default function CsvManagePage() {
                   업로드 기록 보기 →
                 </a>
               </div>
-              <div style={styles.sub}>파일 업로드 → (선택)AI 보정 → Supabase 등록 + 책 분류 지정/관리</div>
+              <div style={styles.sub}>
+                파일 업로드 → (선택)AI 보정 → Supabase 등록 + 책 분류 지정/관리
+              </div>
             </div>
 
             <div style={styles.headerBtns}>
@@ -977,7 +981,12 @@ export default function CsvManagePage() {
           {busy && (
             <div style={styles.progressWrap}>
               <div style={styles.progressBarBg}>
-                <div style={{ ...styles.progressBarFill, width: `${Math.round(progress * 100)}%` }} />
+                <div
+                  style={{
+                    ...styles.progressBarFill,
+                    width: `${Math.round(progress * 100)}%`,
+                  }}
+                />
               </div>
               <div style={styles.progressText}>{Math.round(progress * 100)}%</div>
             </div>
@@ -1002,17 +1011,17 @@ export default function CsvManagePage() {
               <label style={styles.label}>CSV 파일</label>
               <input ref={fileRef} type="file" accept=".csv" style={styles.fileInput} />
               <div style={styles.hint}>
-                같은 book 이름으로 여러 번 등록하면, 기존 단어는 중복 스킵되고 새 단어만 추가되어 책이 점점 완성됩니다.
+                같은 book 이름으로 여러 번 등록하면, 기존 단어는 중복 스킵되고 새 단어만
+                추가되어 책이 점점 완성됩니다.
               </div>
             </div>
 
             <div style={styles.col}>
               <label style={styles.label}>book 이름(책 이름) — 자동완성</label>
 
-              {/* ✅ datalist(브라우저 기본 자동완성) */}
+              {/* ✅ datalist 제거: 커스텀 추천만 사용 (겹침 방지) */}
               <input
                 value={bookOverride}
-                list="__book_suggest_datalist"
                 onChange={(e) => setBookOverride(e.target.value)}
                 onFocus={() => setBookSuggestOpen(true)}
                 onBlur={() => {
@@ -1023,11 +1032,6 @@ export default function CsvManagePage() {
                 style={styles.input}
                 autoComplete="off"
               />
-              <datalist id="__book_suggest_datalist">
-                {(bookSuggest || []).map((b) => (
-                  <option key={b} value={b} />
-                ))}
-              </datalist>
 
               {/* ✅ 커스텀 추천 드롭다운(모바일에서도 확실히 보이게) */}
               {bookSuggestOpen && (bookSuggest?.length > 0 || bookSuggestLoading) && (
@@ -1055,7 +1059,9 @@ export default function CsvManagePage() {
                 </div>
               )}
 
-              {linkedChapter ? <div style={styles.hint}>※ 이 배치는 chapter {linkedChapter} 로 넘어왔습니다.</div> : null}
+              {linkedChapter ? (
+                <div style={styles.hint}>※ 이 배치는 chapter {linkedChapter} 로 넘어왔습니다.</div>
+              ) : null}
               {currentBookName ? (
                 <div style={{ ...styles.hint, marginTop: 6 }}>
                   현재 book: <b>{currentBookName}</b>
@@ -1066,7 +1072,11 @@ export default function CsvManagePage() {
             <div style={styles.col}>
               <label style={styles.label}>AI 보정</label>
               <label style={styles.check}>
-                <input type="checkbox" checked={fillMissing} onChange={(e) => setFillMissing(e.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={fillMissing}
+                  onChange={(e) => setFillMissing(e.target.checked)}
+                />
                 <span style={{ marginLeft: 8 }}>비어 있는 pos/accepted_ko 채우기</span>
               </label>
 
@@ -1074,7 +1084,12 @@ export default function CsvManagePage() {
                 <button type="button" onClick={downloadCsv} disabled={!canDownload} style={styles.btnGhost}>
                   결과 CSV 다운로드
                 </button>
-                <button type="button" onClick={registerToSupabase} disabled={!canRegister} style={styles.btnPinkSolid}>
+                <button
+                  type="button"
+                  onClick={registerToSupabase}
+                  disabled={!canRegister}
+                  style={styles.btnPinkSolid}
+                >
                   Supabase 등록
                 </button>
               </div>
