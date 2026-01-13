@@ -4,23 +4,22 @@ import Papa from "papaparse";
 import { supabase } from "../../utils/supabaseClient";
 
 /**
- * CSV Manage Page
- * - 파일 업로드 → 파싱 → /api/csv-prepare 소배치 호출 → 미리보기
- * - "Supabase 등록" 누르면 vocab_words 다 넣은 뒤에 word_batches 한 줄만 기록
- * - 이번 버전:
- *   1) vocab_words는 upsert + ignoreDuplicates (중복 충돌로 전체 실패 방지)
- *   2) 파일 내부 중복은 사전에 dedupe(스킵 카운트 표시)
- *   3) DB 중복으로 인해 upsert에서 무시된 건수도 추정(= inserted rows 길이로 계산)해서 표시
- *   4) word_batches 기록 뒤에 변환된 CSV도 storage(csv_uploads/{batch.id}.csv)에 저장
+ * CSV Manage Page (통합)
+ * - 파일 업로드 → 파싱 → /api/csv-prepare 소배치 호출 → (선택)AI 보정 → Supabase 등록
+ * - 미리보기 테이블 제거
+ * - 같은 페이지에서:
+ *   1) 분류 트리 관리(추가/수정/삭제)
+ *   2) 현재 book(책이름)에 분류 지정/저장
  *
- * ✅ 요청 반영(UI)
- * - 가운데 흰색 카드(고정 폭 박스) 느낌 최소화: "풀-폭" 레이아웃(최대폭만 넓게) + sticky header
- * - iPhone 모바일 최적화:
- *   - safe-area(노치/홈바) 대응
- *   - 버튼 44px 터치 타겟
- *   - 3열 그리드 → 모바일에서 1열로 자동 변경
- *   - 표는 가로 스크롤 유지
- * - 기능/로직은 그대로 유지
+ * ✅ 추가 요구사항 반영
+ * - 같은 book 이름으로 여러 번 업로드 가능:
+ *   - 이미 들어간 (book+chapter+term_en)은 중복 스킵되어 "책이 점점 완성"됨
+ * - book 이름 입력에 자동완성(이전 등록된 book명 추천)
+ *
+ * ✅ DB 스키마(사용자 제공):
+ * - public.book_category_nodes
+ * - public.book_category_map
+ * - tg_set_updated_at()
  */
 export default function CsvManagePage() {
   const fileRef = useRef(null);
@@ -43,7 +42,31 @@ export default function CsvManagePage() {
 
   // ✅ 등록 결과(중복 스킵 등) 표시
   const [registerReport, setRegisterReport] = useState(null);
-  // { attemptedUnique, inserted, skippedFileDup, skippedDbDup, batchId, book }
+
+  // =========================
+  // ✅ book 자동완성(추천) 상태
+  // =========================
+  const [bookSuggest, setBookSuggest] = useState([]); // string[]
+  const [bookSuggestOpen, setBookSuggestOpen] = useState(false);
+  const [bookSuggestLoading, setBookSuggestLoading] = useState(false);
+  const bookSuggestTimer = useRef(null);
+
+  // =========================
+  // ✅ 분류(트리) 관련 상태
+  // =========================
+  const [catBusy, setCatBusy] = useState(false);
+  const [catError, setCatError] = useState("");
+  const [flatCats, setFlatCats] = useState([]); // book_category_nodes 원본
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [selectedCatId, setSelectedCatId] = useState(null);
+
+  // 현재 book에 매핑된 category_id
+  const [mappedCategoryId, setMappedCategoryId] = useState(null);
+
+  // 입력
+  const [newRootName, setNewRootName] = useState("");
+  const [newChildName, setNewChildName] = useState("");
+  const [renameName, setRenameName] = useState("");
 
   // 쿼리스트링 읽어서 기본값 세팅
   useEffect(() => {
@@ -61,9 +84,115 @@ export default function CsvManagePage() {
     }
   }, []);
 
-  const previewRows = useMemo(() => rows.slice(0, 50), [rows]);
+  // 현재 book 이름(= 매핑 단위)
+  const currentBookName = useMemo(() => {
+    return (bookOverride || stats?.book || "").toString().trim();
+  }, [bookOverride, stats?.book]);
 
+  // ✅ 분류 로드
+  useEffect(() => {
+    loadCategories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ✅ book이 바뀌면 매핑 로드
+  useEffect(() => {
+    if (!currentBookName) {
+      setMappedCategoryId(null);
+      return;
+    }
+    loadBookCategoryForBook(currentBookName);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentBookName]);
+
+  // =========================
+  // ✅ book 자동완성 로드 (debounce)
+  // =========================
+  useEffect(() => {
+    // bookOverride 변경될 때마다 추천 갱신(너무 자주 호출 방지)
+    const q = (bookOverride || "").trim();
+
+    if (bookSuggestTimer.current) clearTimeout(bookSuggestTimer.current);
+    bookSuggestTimer.current = setTimeout(() => {
+      loadBookSuggestions(q);
+    }, 220);
+
+    return () => {
+      if (bookSuggestTimer.current) clearTimeout(bookSuggestTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookOverride]);
+
+  // 첫 진입 시에도 최근 book 목록 한 번 로드(빈 검색)
+  useEffect(() => {
+    loadBookSuggestions("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function loadBookSuggestions(query) {
+    setBookSuggestLoading(true);
+    try {
+      const q = (query || "").trim();
+      const like = q ? `%${q}%` : "%";
+
+      // ✅ 1) word_batches에서 최근 book 먼저(가벼움)
+      const { data: b1, error: e1 } = await supabase
+        .from("word_batches")
+        .select("book,created_at")
+        .ilike("book", like)
+        .order("created_at", { ascending: false })
+        .limit(60);
+
+      if (e1) throw new Error(e1.message);
+
+      // ✅ 2) vocab_words에서도 book을 조금 보강(혹시 batches가 적을 때)
+      const { data: b2, error: e2 } = await supabase
+        .from("vocab_words")
+        .select("book,created_at")
+        .ilike("book", like)
+        .order("created_at", { ascending: false })
+        .limit(60);
+
+      if (e2) {
+        // vocab_words 쪽은 실패해도 batches만으로 동작하게(경고만)
+        console.warn("vocab_words book suggestion error:", e2.message);
+      }
+
+      const merged = [];
+      const seen = new Set();
+
+      const pushBook = (val) => {
+        const s = (val || "").toString().trim();
+        if (!s) return;
+        if (seen.has(s)) return;
+        seen.add(s);
+        merged.push(s);
+      };
+
+      (b1 || []).forEach((x) => pushBook(x.book));
+      (b2 || []).forEach((x) => pushBook(x.book));
+
+      // 너무 많으면 20개만
+      setBookSuggest(merged.slice(0, 20));
+    } catch (e) {
+      console.warn("loadBookSuggestions failed:", e?.message || String(e));
+      // 조용히 실패 처리(자동완성은 부가 기능)
+      setBookSuggest([]);
+    } finally {
+      setBookSuggestLoading(false);
+    }
+  }
+
+  function applyBookSuggestion(name) {
+    const v = (name || "").toString().trim();
+    if (!v) return;
+    setBookOverride(v);
+    setBookSuggestOpen(false);
+  }
+
+  // =========================
   // 공통: chapter를 안전하게 숫자로 바꾸기
+  // =========================
   function toSafeChapter(val) {
     if (val === undefined || val === null || val === "") return null;
     const n = Number(val);
@@ -86,9 +215,6 @@ export default function CsvManagePage() {
   }
 
   // ✅ 파일 내부 중복 제거 + (가능하면) 정보 보강 병합
-  // - 같은 key가 여러 번 나오면:
-  //   1) meaning_ko/pos/accepted_ko가 비어있으면 뒤의 값으로 채우기
-  //   2) accepted_ko는 콤마로 합치기(중복 제거)
   function dedupeRowsWithMerge(inputRows) {
     const map = new Map();
     let dupCount = 0;
@@ -176,7 +302,7 @@ export default function CsvManagePage() {
       (r) => r.term_en !== "" || r.meaning_ko !== "" || r.pos !== "" || r.accepted_ko !== ""
     );
 
-    // 미리보기에서는 비어 있으면 0으로만 보이게
+    // chapter 비어 있으면 "0"
     out = out.map((r) => ({
       ...r,
       chapter: r.chapter === "" ? "0" : r.chapter,
@@ -319,6 +445,11 @@ export default function CsvManagePage() {
         filled_pos_count: withPos,
         filled_acc_count: withAcc,
       });
+
+      // 업로드 후 매핑 재조회
+      if (fallbackBook) {
+        await loadBookCategoryForBook(fallbackBook);
+      }
     } catch (e) {
       setErrorMsg(e.message || String(e));
     } finally {
@@ -339,11 +470,10 @@ export default function CsvManagePage() {
   }
 
   /**
-   * 1) vocab_words upsert(ignoreDuplicates)로 등록
-   *    - 파일 내부 중복은 사전에 dedupe하여 스킵(카운트 표시)
-   *    - DB에 이미 있는 동일 키는 upsert(ignoreDuplicates)로 자동 스킵(카운트 표시)
-   * 2) 성공하면 word_batches 한 줄 기록
-   * 3) 그리고 변환된 CSV를 storage(csv_uploads/{batch.id}.csv)에 업로드
+   * ✅ 책을 "누적 완성"하는 업로드 방식
+   * - 같은 book 이름으로 여러 번 등록 가능
+   * - (book,chapter,term_en) 유니크 기준으로 이미 있던 것은 스킵, 새 것만 추가
+   * - => 1~3강 먼저 올리고, 4~30강 나중에 올려도 같은 book으로 계속 쌓임
    */
   async function registerToSupabase() {
     setErrorMsg("");
@@ -370,7 +500,7 @@ export default function CsvManagePage() {
         const accepted_ko = (r.accepted_ko ?? "").toString().trim() || null;
 
         return {
-          book: finalBook, // ✅ bookOverride/선택 book으로 강제 통일
+          book: finalBook,
           chapter: toSafeChapter(rawChapter),
           term_en: (r.term_en ?? "").toString().trim(),
           meaning_ko: (r.meaning_ko ?? "").toString().trim(),
@@ -389,7 +519,6 @@ export default function CsvManagePage() {
       for (let i = 0; i < deduped.length; i += CHUNK) {
         const chunk = deduped.slice(i, i + CHUNK);
 
-        // key가 완전히 비어있는 행은 제외(안전)
         const safeChunk = chunk.filter(
           (r) =>
             String(r.book ?? "").trim() &&
@@ -404,9 +533,9 @@ export default function CsvManagePage() {
           .from("vocab_words")
           .upsert(safeChunk, {
             onConflict: "book,chapter,term_en",
-            ignoreDuplicates: true,
+            ignoreDuplicates: true, // ✅ 이미 있던 건 "스킵" => 누적 업로드에 최적
           })
-          .select("id"); // inserted row 수 추정용
+          .select("id");
 
         if (e2) {
           throw new Error(`[vocab_words.upsert] ${e2.message}`);
@@ -420,7 +549,7 @@ export default function CsvManagePage() {
 
       const skippedDbDup = Math.max(0, attemptedUnique - inserted);
 
-      // 2) word_batches 기록
+      // 2) word_batches 기록(로그)
       const { data: batch, error: e1 } = await supabase
         .from("word_batches")
         .insert({
@@ -438,15 +567,17 @@ export default function CsvManagePage() {
         );
       }
 
-      // 3) Storage 업로드
+      // 3) Storage 업로드(로그용 CSV 저장)
       if (resultCsv && batch?.id) {
         const csvBlob = new Blob([resultCsv], { type: "text/csv;charset=utf-8" });
         const storagePath = `${batch.id}.csv`;
 
-        const { error: uploadErr } = await supabase.storage.from("csv_uploads").upload(storagePath, csvBlob, {
-          upsert: true,
-          contentType: "text/csv",
-        });
+        const { error: uploadErr } = await supabase.storage
+          .from("csv_uploads")
+          .upload(storagePath, csvBlob, {
+            upsert: true,
+            contentType: "text/csv",
+          });
 
         if (uploadErr) {
           alert(
@@ -466,12 +597,16 @@ export default function CsvManagePage() {
         book: finalBook,
       });
 
+      // ✅ 등록 후 book 추천 목록도 최신화
+      loadBookSuggestions(finalBook);
+
       alert(
         `등록 완료!\n배치ID: ${batch?.id}\n` +
           `유니크 기준 시도: ${attemptedUnique.toLocaleString()}건\n` +
           `신규 등록: ${inserted.toLocaleString()}건\n` +
           `중복 스킵(파일): ${skippedFileDup.toLocaleString()}건\n` +
-          `중복 스킵(DB): ${skippedDbDup.toLocaleString()}건`
+          `중복 스킵(DB): ${skippedDbDup.toLocaleString()}건\n\n` +
+          `✅ 같은 book 이름으로 나중에 강을 추가 업로드하면, 책이 계속 누적되어 완성됩니다.`
       );
     } catch (e) {
       setErrorMsg(e.message || String(e));
@@ -479,6 +614,322 @@ export default function CsvManagePage() {
       setBusy(false);
       setProgress(0);
     }
+  }
+
+  // =========================
+  // ✅ 분류 트리 로직 (book_category_nodes)
+  // =========================
+  async function loadCategories() {
+    setCatError("");
+    setCatBusy(true);
+    try {
+      const { data, error } = await supabase
+        .from("book_category_nodes")
+        .select("id,parent_id,name,sort_order,created_at,updated_at")
+        .order("parent_id", { ascending: true, nullsFirst: true })
+        .order("sort_order", { ascending: true })
+        .order("name", { ascending: true });
+
+      if (error) throw new Error(error.message);
+      setFlatCats(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setCatError(e.message || String(e));
+    } finally {
+      setCatBusy(false);
+    }
+  }
+
+  // 트리 구성
+  const catTree = useMemo(() => {
+    const list = Array.isArray(flatCats) ? flatCats : [];
+    const byParent = new Map();
+    for (const n of list) {
+      const p = n.parent_id || "root";
+      if (!byParent.has(p)) byParent.set(p, []);
+      byParent.get(p).push(n);
+    }
+    for (const [k, arr] of byParent.entries()) {
+      arr.sort((a, b) => {
+        const sa = a.sort_order ?? 0;
+        const sb = b.sort_order ?? 0;
+        if (sa !== sb) return sa - sb;
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      });
+      byParent.set(k, arr);
+    }
+
+    function build(parentKey) {
+      const children = byParent.get(parentKey) || [];
+      return children.map((c) => ({
+        ...c,
+        children: build(c.id),
+      }));
+    }
+
+    return build("root");
+  }, [flatCats]);
+
+  function toggleExpand(id) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectNode(id) {
+    setSelectedCatId(id);
+    setRenameName("");
+  }
+
+  const selectedNode = useMemo(() => {
+    return flatCats.find((x) => x.id === selectedCatId) || null;
+  }, [flatCats, selectedCatId]);
+
+  async function addRootCategory() {
+    const name = (newRootName || "").trim();
+    if (!name) return;
+
+    setCatError("");
+    setCatBusy(true);
+    try {
+      const maxSort =
+        Math.max(
+          0,
+          ...flatCats.filter((x) => !x.parent_id).map((x) => x.sort_order ?? 0)
+        ) + 1;
+
+      const { error } = await supabase.from("book_category_nodes").insert({
+        name,
+        parent_id: null,
+        sort_order: maxSort,
+      });
+
+      if (error) throw new Error(error.message);
+
+      setNewRootName("");
+      await loadCategories();
+    } catch (e) {
+      setCatError(e.message || String(e));
+    } finally {
+      setCatBusy(false);
+    }
+  }
+
+  async function addChildCategory() {
+    const name = (newChildName || "").trim();
+    if (!name) return;
+    if (!selectedCatId) {
+      setCatError("하위 분류를 추가하려면 먼저 부모 분류를 선택하세요.");
+      return;
+    }
+
+    setCatError("");
+    setCatBusy(true);
+    try {
+      const siblings = flatCats.filter((x) => x.parent_id === selectedCatId);
+      const maxSort = Math.max(0, ...siblings.map((x) => x.sort_order ?? 0)) + 1;
+
+      const { error } = await supabase.from("book_category_nodes").insert({
+        name,
+        parent_id: selectedCatId,
+        sort_order: maxSort,
+      });
+
+      if (error) throw new Error(error.message);
+
+      setNewChildName("");
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        next.add(selectedCatId);
+        return next;
+      });
+
+      await loadCategories();
+    } catch (e) {
+      setCatError(e.message || String(e));
+    } finally {
+      setCatBusy(false);
+    }
+  }
+
+  async function renameCategory() {
+    if (!selectedCatId) return;
+    const name = (renameName || "").trim();
+    if (!name) return;
+
+    setCatError("");
+    setCatBusy(true);
+    try {
+      const { error } = await supabase
+        .from("book_category_nodes")
+        .update({ name })
+        .eq("id", selectedCatId);
+
+      if (error) throw new Error(error.message);
+
+      setRenameName("");
+      await loadCategories();
+    } catch (e) {
+      setCatError(e.message || String(e));
+    } finally {
+      setCatBusy(false);
+    }
+  }
+
+  async function deleteCategory() {
+    if (!selectedCatId) return;
+    setCatError("");
+    setCatBusy(true);
+    try {
+      const { error } = await supabase
+        .from("book_category_nodes")
+        .delete()
+        .eq("id", selectedCatId);
+      if (error) throw new Error(error.message);
+
+      setSelectedCatId(null);
+      setRenameName("");
+
+      if (mappedCategoryId === selectedCatId) {
+        setMappedCategoryId(null);
+      }
+
+      await loadCategories();
+      if (currentBookName) await loadBookCategoryForBook(currentBookName);
+    } catch (e) {
+      setCatError(e.message || String(e));
+    } finally {
+      setCatBusy(false);
+    }
+  }
+
+  // =========================
+  // ✅ book_category_map 로딩/저장
+  // =========================
+  async function loadBookCategoryForBook(book) {
+    const b = (book || "").toString().trim();
+    if (!b) return;
+
+    setCatError("");
+    try {
+      const { data, error } = await supabase
+        .from("book_category_map")
+        .select("book,category_id")
+        .eq("book", b)
+        .maybeSingle();
+
+      if (error) throw new Error(error.message);
+      setMappedCategoryId(data?.category_id || null);
+    } catch (e) {
+      setCatError(e.message || String(e));
+      setMappedCategoryId(null);
+    }
+  }
+
+  async function saveBookCategoryMapping() {
+    const b = (currentBookName || "").toString().trim();
+    if (!b) {
+      setCatError("book 이름이 비어 있습니다. 먼저 book 이름을 지정하세요.");
+      return;
+    }
+    if (!selectedCatId) {
+      setCatError("책에 지정할 분류를 트리에서 선택하세요.");
+      return;
+    }
+
+    setCatError("");
+    setCatBusy(true);
+    try {
+      const { error } = await supabase
+        .from("book_category_map")
+        .upsert(
+          {
+            book: b,
+            category_id: selectedCatId,
+          },
+          { onConflict: "book" }
+        );
+
+      if (error) throw new Error(error.message);
+
+      setMappedCategoryId(selectedCatId);
+    } catch (e) {
+      setCatError(e.message || String(e));
+    } finally {
+      setCatBusy(false);
+    }
+  }
+
+  async function clearBookCategoryMapping() {
+    const b = (currentBookName || "").toString().trim();
+    if (!b) return;
+
+    setCatError("");
+    setCatBusy(true);
+    try {
+      const { error } = await supabase.from("book_category_map").delete().eq("book", b);
+      if (error) throw new Error(error.message);
+
+      setMappedCategoryId(null);
+    } catch (e) {
+      setCatError(e.message || String(e));
+    } finally {
+      setCatBusy(false);
+    }
+  }
+
+  // =========================
+  // UI helpers
+  // =========================
+  function renderTree(nodes, depth = 0) {
+    return nodes.map((n) => {
+      const hasChildren = Array.isArray(n.children) && n.children.length > 0;
+      const expanded = expandedIds.has(n.id);
+      const selected = selectedCatId === n.id;
+      const mapped = mappedCategoryId === n.id;
+
+      return (
+        <div key={n.id}>
+          <div
+            role="button"
+            onClick={() => selectNode(n.id)}
+            style={{
+              ...styles.nodeRow,
+              paddingLeft: 10 + depth * 14,
+              background: selected ? "rgba(255,111,163,0.10)" : "#fff",
+              borderColor: selected ? "rgba(255,111,163,0.45)" : "rgba(31,42,68,0.10)",
+            }}
+            title={n.name}
+          >
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (hasChildren) toggleExpand(n.id);
+              }}
+              style={{
+                ...styles.iconBtn,
+                opacity: hasChildren ? 1 : 0.35,
+                cursor: hasChildren ? "pointer" : "default",
+              }}
+              aria-label="toggle"
+              title={hasChildren ? (expanded ? "접기" : "펼치기") : "하위 없음"}
+            >
+              {hasChildren ? (expanded ? "▾" : "▸") : "•"}
+            </button>
+
+            <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ ...styles.nodeName, fontWeight: selected ? 900 : 800 }}>{n.name}</div>
+              {mapped && <span style={styles.badge}>현재 book</span>}
+            </div>
+          </div>
+
+          {hasChildren && expanded && <div style={{ marginTop: 6 }}>{renderTree(n.children, depth + 1)}</div>}
+        </div>
+      );
+    });
   }
 
   const canRunAi = !busy;
@@ -493,14 +944,12 @@ export default function CsvManagePage() {
           <div style={styles.headerTop}>
             <div style={{ minWidth: 0 }}>
               <div style={styles.titleRow}>
-                <div style={styles.title}>CSV 관리 (AI 자동 변환/보정)</div>
+                <div style={styles.title}>CSV 관리 (AI 변환/보정 + 책 분류)</div>
                 <a href="/admin/csv/batches" style={styles.link}>
                   업로드 기록 보기 →
                 </a>
               </div>
-              <div style={styles.sub}>
-                파일 업로드 → (선택)AI 보정 → 미리보기 → Supabase 등록(word_batches + storage 업로드)
-              </div>
+              <div style={styles.sub}>파일 업로드 → (선택)AI 보정 → Supabase 등록 + 책 분류 지정/관리</div>
             </div>
 
             <div style={styles.headerBtns}>
@@ -528,12 +977,7 @@ export default function CsvManagePage() {
           {busy && (
             <div style={styles.progressWrap}>
               <div style={styles.progressBarBg}>
-                <div
-                  style={{
-                    ...styles.progressBarFill,
-                    width: `${Math.round(progress * 100)}%`,
-                  }}
-                />
+                <div style={{ ...styles.progressBarFill, width: `${Math.round(progress * 100)}%` }} />
               </div>
               <div style={styles.progressText}>{Math.round(progress * 100)}%</div>
             </div>
@@ -549,7 +993,7 @@ export default function CsvManagePage() {
 
       {/* ✅ content (풀-폭) */}
       <div style={styles.content}>
-        {/* 설정 카드 */}
+        {/* 설정 */}
         <div style={styles.card}>
           <div style={styles.cardTitle}>업로드 / 옵션</div>
 
@@ -557,30 +1001,72 @@ export default function CsvManagePage() {
             <div style={styles.col}>
               <label style={styles.label}>CSV 파일</label>
               <input ref={fileRef} type="file" accept=".csv" style={styles.fileInput} />
-              <div style={styles.hint}>어떤 형식이든 올리면 됩니다. (중복 제거/병합은 등록 단계에서 수행)</div>
+              <div style={styles.hint}>
+                같은 book 이름으로 여러 번 등록하면, 기존 단어는 중복 스킵되고 새 단어만 추가되어 책이 점점 완성됩니다.
+              </div>
             </div>
 
             <div style={styles.col}>
-              <label style={styles.label}>book 이름(선택)</label>
+              <label style={styles.label}>book 이름(책 이름) — 자동완성</label>
+
+              {/* ✅ datalist(브라우저 기본 자동완성) */}
               <input
                 value={bookOverride}
+                list="__book_suggest_datalist"
                 onChange={(e) => setBookOverride(e.target.value)}
-                placeholder="(지정하지 않으면 파일명으로 사용)"
+                onFocus={() => setBookSuggestOpen(true)}
+                onBlur={() => {
+                  // 클릭 선택을 위해 약간 늦게 닫기
+                  setTimeout(() => setBookSuggestOpen(false), 120);
+                }}
+                placeholder="예: 워드마스터 수능2000 (파생어포함, 2023개정)"
                 style={styles.input}
+                autoComplete="off"
               />
-              {linkedChapter ? (
-                <div style={styles.hint}>※ 이 배치는 chapter {linkedChapter} 로 넘어왔습니다.</div>
+              <datalist id="__book_suggest_datalist">
+                {(bookSuggest || []).map((b) => (
+                  <option key={b} value={b} />
+                ))}
+              </datalist>
+
+              {/* ✅ 커스텀 추천 드롭다운(모바일에서도 확실히 보이게) */}
+              {bookSuggestOpen && (bookSuggest?.length > 0 || bookSuggestLoading) && (
+                <div style={styles.suggestBox}>
+                  <div style={styles.suggestHeader}>
+                    <div style={{ fontWeight: 900 }}>추천 book</div>
+                    <div style={styles.suggestSub}>
+                      {bookSuggestLoading ? "불러오는 중…" : `${bookSuggest.length}개`}
+                    </div>
+                  </div>
+                  <div style={styles.suggestList}>
+                    {(bookSuggest || []).map((b) => (
+                      <button
+                        key={b}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applyBookSuggestion(b)}
+                        style={styles.suggestItem}
+                        title={b}
+                      >
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {linkedChapter ? <div style={styles.hint}>※ 이 배치는 chapter {linkedChapter} 로 넘어왔습니다.</div> : null}
+              {currentBookName ? (
+                <div style={{ ...styles.hint, marginTop: 6 }}>
+                  현재 book: <b>{currentBookName}</b>
+                </div>
               ) : null}
             </div>
 
             <div style={styles.col}>
               <label style={styles.label}>AI 보정</label>
               <label style={styles.check}>
-                <input
-                  type="checkbox"
-                  checked={fillMissing}
-                  onChange={(e) => setFillMissing(e.target.checked)}
-                />
+                <input type="checkbox" checked={fillMissing} onChange={(e) => setFillMissing(e.target.checked)} />
                 <span style={{ marginLeft: 8 }}>비어 있는 pos/accepted_ko 채우기</span>
               </label>
 
@@ -640,70 +1126,190 @@ export default function CsvManagePage() {
                 <div style={styles.reportValue}>{registerReport.batchId || "-"}</div>
               </div>
               <div style={styles.reportHint}>
-                ※ “파일 내부 중복”은 업로드 파일 안에서 (book+chapter+term_en)이 반복된 경우, <br />
-                “DB 기존 중복”은 이미 DB에 있던 동일 키가 upsert(ignoreDuplicates)로 자동 스킵된 경우입니다.
+                ※ 같은 book으로 다시 업로드해도 이미 있던 (book+chapter+term_en)은 스킵되고 새 강/새 단어만 추가됩니다.
               </div>
             </div>
           )}
         </div>
 
-        {/* 미리보기 테이블 */}
-        {rows.length > 0 && (
-          <div style={styles.card}>
-            <div style={styles.subhead}>
-              <div style={{ fontWeight: 900 }}>미리보기 (상위 50행)</div>
-              <div style={styles.muted}>총 {rows.length.toLocaleString()}건</div>
+        {/* ✅ 여기부터: 미리보기 대신 "분류 트리 + 관리 + 책에 지정" */}
+        <div style={{ height: 12 }} />
+
+        <div style={styles.card}>
+          <div style={styles.subhead}>
+            <div style={{ fontWeight: 900 }}>책 분류(트리) / 분류 지정</div>
+            <div style={styles.muted}>{catBusy ? "불러오는 중…" : `분류 ${flatCats.length.toLocaleString()}개`}</div>
+          </div>
+
+          {catError && (
+            <div style={{ ...styles.error, marginTop: 0 }}>
+              <strong>분류 오류:</strong> {catError}
+            </div>
+          )}
+
+          <div className="_cat_grid" style={styles.catGrid}>
+            {/* 왼쪽: 트리 */}
+            <div style={styles.catCol}>
+              <div style={styles.catBoxTitle}>분류 트리</div>
+
+              <div style={styles.catBox}>
+                {catBusy ? (
+                  <div style={styles.catEmpty}>불러오는 중…</div>
+                ) : catTree.length === 0 ? (
+                  <div style={styles.catEmpty}>아직 분류가 없습니다. 오른쪽에서 “루트 분류 추가” 해주세요.</div>
+                ) : (
+                  <div>{renderTree(catTree)}</div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <button type="button" onClick={loadCategories} style={styles.btnGhost} disabled={catBusy}>
+                  새로고침
+                </button>
+
+                <button
+                  type="button"
+                  onClick={saveBookCategoryMapping}
+                  style={styles.btnPinkSolid}
+                  disabled={catBusy || !currentBookName || !selectedCatId}
+                  title="현재 book에 선택한 분류를 저장합니다."
+                >
+                  현재 book에 분류 지정
+                </button>
+
+                <button
+                  type="button"
+                  onClick={clearBookCategoryMapping}
+                  style={styles.btnDangerGhost}
+                  disabled={catBusy || !currentBookName || !mappedCategoryId}
+                  title="현재 book의 분류 지정을 해제합니다."
+                >
+                  분류 지정 해제
+                </button>
+              </div>
+
+              <div style={styles.catHint}>
+                현재 book: <b>{currentBookName || "(없음)"}</b>
+                <br />
+                지정된 분류:{" "}
+                <b>
+                  {mappedCategoryId ? flatCats.find((x) => x.id === mappedCategoryId)?.name || "(알 수 없음)" : "-"}
+                </b>
+              </div>
             </div>
 
-            <div style={styles.tableCard}>
-              <div style={styles.tableWrap}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>book</th>
-                      <th style={styles.th}>chapter</th>
-                      <th style={styles.th}>term_en</th>
-                      <th style={styles.th}>meaning_ko</th>
-                      <th style={styles.th}>pos</th>
-                      <th style={styles.th}>accepted_ko</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewRows.map((r, i) => (
-                      <tr key={i}>
-                        <td style={{ ...styles.td, ...styles.ellipsis }} title={r.book || ""}>
-                          {r.book}
-                        </td>
-                        <td style={styles.td}>{r.chapter}</td>
-                        <td style={{ ...styles.td, ...styles.ellipsis }} title={r.term_en || ""}>
-                          {r.term_en}
-                        </td>
-                        <td style={{ ...styles.td, ...styles.ellipsis }} title={r.meaning_ko || ""}>
-                          {r.meaning_ko}
-                        </td>
-                        <td style={styles.td}>{r.pos}</td>
-                        <td style={{ ...styles.td, ...styles.ellipsis }} title={r.accepted_ko || ""}>
-                          {r.accepted_ko}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {/* 오른쪽: 관리 패널 */}
+            <div style={styles.catCol}>
+              <div style={styles.catBoxTitle}>분류 관리</div>
+
+              <div style={styles.manageBox}>
+                <div style={styles.manageSection}>
+                  <div style={styles.manageTitle}>루트 분류 추가</div>
+                  <div style={styles.manageRow}>
+                    <input
+                      value={newRootName}
+                      onChange={(e) => setNewRootName(e.target.value)}
+                      placeholder="예: 중등 / 고등 / 수능 / 교재..."
+                      style={styles.input}
+                      disabled={catBusy}
+                    />
+                    <button
+                      type="button"
+                      onClick={addRootCategory}
+                      style={styles.btnPinkSolid}
+                      disabled={catBusy || !newRootName.trim()}
+                    >
+                      추가
+                    </button>
+                  </div>
+                </div>
+
+                <div style={styles.hr} />
+
+                <div style={styles.manageSection}>
+                  <div style={styles.manageTitle}>하위 분류 추가</div>
+                  <div style={styles.manageSub}>
+                    부모: <b>{selectedNode ? selectedNode.name : "(선택 없음)"} </b>
+                    <span style={{ color: "#5d6b82" }}>(트리에서 부모를 클릭)</span>
+                  </div>
+                  <div style={styles.manageRow}>
+                    <input
+                      value={newChildName}
+                      onChange={(e) => setNewChildName(e.target.value)}
+                      placeholder="예: 중1~중2 / 중2~중3 / ..."
+                      style={styles.input}
+                      disabled={catBusy}
+                    />
+                    <button
+                      type="button"
+                      onClick={addChildCategory}
+                      style={styles.btnPinkSolid}
+                      disabled={catBusy || !selectedCatId || !newChildName.trim()}
+                    >
+                      추가
+                    </button>
+                  </div>
+                </div>
+
+                <div style={styles.hr} />
+
+                <div style={styles.manageSection}>
+                  <div style={styles.manageTitle}>이름 변경 / 삭제</div>
+                  <div style={styles.manageSub}>
+                    선택: <b>{selectedNode ? selectedNode.name : "(선택 없음)"}</b>
+                  </div>
+                  <div style={styles.manageRow}>
+                    <input
+                      value={renameName}
+                      onChange={(e) => setRenameName(e.target.value)}
+                      placeholder="새 이름"
+                      style={styles.input}
+                      disabled={catBusy || !selectedCatId}
+                    />
+                    <button
+                      type="button"
+                      onClick={renameCategory}
+                      style={styles.btnGhost}
+                      disabled={catBusy || !selectedCatId || !renameName.trim()}
+                    >
+                      변경
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={deleteCategory}
+                      style={styles.btnDangerSolid}
+                      disabled={catBusy || !selectedCatId}
+                      title="선택한 분류를 삭제합니다. (하위도 함께 삭제됩니다)"
+                    >
+                      선택 분류 삭제
+                    </button>
+                    <div style={styles.warn}>
+                      삭제 시 하위 분류도 함께 삭제됩니다(ON DELETE CASCADE).
+                      <br />
+                      또한 해당 분류로 지정된 book 매핑도 삭제됩니다(ON DELETE CASCADE).
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div style={styles.mobileHint}>모바일에서는 표가 좌우로 스크롤됩니다. (←→)</div>
+
+              <div style={styles.catHint}>💡 팁: 트리에서 펼침/접힘은 왼쪽 아이콘(▸/▾)으로 조작합니다.</div>
             </div>
           </div>
-        )}
+        </div>
 
         <div style={{ height: 16 }} />
       </div>
 
-      {/* ✅ 반응형 + iPhone safe-area 보완 */}
+      {/* ✅ 반응형 */}
       <style>{`
         @media (max-width: 860px) {
           ._csv_grid { grid-template-columns: 1fr !important; }
           ._csv_stats { grid-template-columns: 140px 1fr !important; }
           ._csv_report { grid-template-columns: 140px 1fr !important; }
+          ._cat_grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
     </div>
@@ -711,20 +1317,6 @@ export default function CsvManagePage() {
 }
 
 const styles = {
-  _theme: {
-    bg: "#fff5f8",
-    card: "#ffffff",
-    text: "#1f2a44",
-    sub: "#5d6b82",
-    border: "#e9eef5",
-    borderPink: "#ffd3e3",
-    pink: "#ff6fa3",
-    pinkSoft: "#fff0f6",
-    dangerBg: "#fff1f2",
-    dangerBorder: "#fecdd3",
-    dangerText: "#9f1239",
-  },
-
   page: {
     minHeight: "100vh",
     height: "100dvh",
@@ -833,6 +1425,36 @@ const styles = {
     background: "#fff",
   },
 
+  // ✅ book 추천 드롭다운
+  suggestBox: {
+    marginTop: 8,
+    borderRadius: 14,
+    border: "1px solid rgba(31,42,68,0.12)",
+    background: "#fff",
+    overflow: "hidden",
+    boxShadow: "0 12px 24px rgba(31,42,68,0.10)",
+  },
+  suggestHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 10,
+    padding: "10px 12px",
+    borderBottom: "1px solid rgba(31,42,68,0.08)",
+  },
+  suggestSub: { fontSize: 12, color: "#5d6b82", fontWeight: 900 },
+  suggestList: { maxHeight: 220, overflow: "auto" },
+  suggestItem: {
+    width: "100%",
+    textAlign: "left",
+    padding: "10px 12px",
+    border: "none",
+    background: "#fff",
+    cursor: "pointer",
+    fontWeight: 900,
+    color: "#1f2a44",
+    borderBottom: "1px solid rgba(31,42,68,0.06)",
+  },
+
   check: { display: "flex", alignItems: "center", height: 44, fontWeight: 800, color: "#1f2a44" },
 
   btnPink: {
@@ -879,6 +1501,34 @@ const styles = {
     whiteSpace: "nowrap",
   },
 
+  btnDangerSolid: {
+    height: 44,
+    padding: "0 14px",
+    borderRadius: 12,
+    border: "1px solid #e54848",
+    background: "#e54848",
+    color: "#fff",
+    fontWeight: 900,
+    cursor: "pointer",
+    WebkitTapHighlightColor: "transparent",
+    touchAction: "manipulation",
+    whiteSpace: "nowrap",
+  },
+
+  btnDangerGhost: {
+    height: 44,
+    padding: "0 14px",
+    borderRadius: 12,
+    border: "1px solid rgba(229,72,72,0.35)",
+    background: "#fff",
+    color: "#b91c1c",
+    fontWeight: 900,
+    cursor: "pointer",
+    WebkitTapHighlightColor: "transparent",
+    touchAction: "manipulation",
+    whiteSpace: "nowrap",
+  },
+
   stats: {
     marginTop: 12,
     padding: 12,
@@ -913,40 +1563,93 @@ const styles = {
   subhead: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 },
   muted: { color: "#5d6b82", fontWeight: 800, fontSize: 12 },
 
-  tableCard: {
-    borderRadius: 16,
-    border: "1px solid #e9eef5",
-    background: "#fff",
-    overflow: "hidden",
+  // =========================
+  // 분류 UI
+  // =========================
+  catGrid: {
+    display: "grid",
+    gridTemplateColumns: "1.1fr 0.9fr",
+    gap: 12,
+    alignItems: "start",
   },
-  tableWrap: { width: "100%", overflow: "auto" },
-  table: { width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 980 },
+  catCol: { minWidth: 0 },
 
-  th: {
-    position: "sticky",
-    top: 0,
+  catBoxTitle: { fontSize: 13, fontWeight: 900, color: "#1f2a44", marginBottom: 8 },
+
+  catBox: {
+    border: "1px solid rgba(31,42,68,0.10)",
+    borderRadius: 14,
+    padding: 10,
     background: "#fff",
-    zIndex: 1,
-    textAlign: "left",
-    fontSize: 12,
-    color: "#5d6b82",
-    fontWeight: 900,
-    padding: "12px 12px",
-    borderBottom: "1px solid #e9eef5",
-    whiteSpace: "nowrap",
+    maxHeight: 520,
+    overflow: "auto",
   },
-  td: {
-    padding: "12px 12px",
-    borderBottom: "1px solid #f1f4f8",
+
+  catEmpty: { padding: 10, color: "#5d6b82", fontWeight: 800, fontSize: 13, lineHeight: 1.45 },
+
+  nodeRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "10px 10px",
+    borderRadius: 12,
+    border: "1px solid rgba(31,42,68,0.10)",
+    cursor: "pointer",
+    userSelect: "none",
+  },
+  iconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    border: "1px solid rgba(31,42,68,0.10)",
+    background: "#fff",
+    fontWeight: 900,
+    color: "#1f2a44",
+  },
+  nodeName: {
     fontSize: 13,
     color: "#1f2a44",
-    fontWeight: 700,
-    verticalAlign: "middle",
-    background: "#fff",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    maxWidth: 360,
+  },
+  badge: {
+    fontSize: 11,
+    fontWeight: 900,
+    padding: "3px 8px",
+    borderRadius: 999,
+    background: "rgba(47,111,237,0.10)",
+    border: "1px solid rgba(47,111,237,0.25)",
+    color: "#1d4ed8",
     whiteSpace: "nowrap",
   },
 
-  ellipsis: { maxWidth: 420, overflow: "hidden", textOverflow: "ellipsis" },
+  manageBox: {
+    border: "1px solid rgba(31,42,68,0.10)",
+    borderRadius: 14,
+    padding: 12,
+    background: "#fff",
+  },
+  manageSection: { padding: 2 },
+  manageTitle: { fontWeight: 900, fontSize: 13, marginBottom: 8 },
+  manageSub: { fontSize: 12, color: "#5d6b82", fontWeight: 800, marginBottom: 8, lineHeight: 1.45 },
+  manageRow: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
 
-  mobileHint: { padding: "10px 12px", fontSize: 12, color: "#5d6b82", fontWeight: 800, background: "#fff" },
+  hr: { height: 1, background: "rgba(31,42,68,0.10)", margin: "12px 0" },
+
+  warn: {
+    fontSize: 12,
+    color: "#5d6b82",
+    fontWeight: 800,
+    lineHeight: 1.45,
+  },
+
+  catHint: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#5d6b82",
+    fontWeight: 800,
+    lineHeight: 1.45,
+  },
 };

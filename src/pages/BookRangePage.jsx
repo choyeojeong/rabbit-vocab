@@ -560,7 +560,9 @@ export default function BookRangePage({ mode = "practice" }) {
                               const baseName = (me?.name || "").trim() || "나";
                               const d = r.exam_date || r.created_at;
                               const dateLabel = d ? dayjs(d).format("YYYY.MM.DD") : "";
-                              const displayTitle = dateLabel ? `${baseName} ${dateLabel}` : baseName;
+                              const displayTitle = dateLabel
+                                ? `${baseName} ${dateLabel}`
+                                : baseName;
 
                               const bookLine = (r.source_book || "").trim();
                               const rangeLine = (r.source_chapters_text || "").trim();
@@ -645,7 +647,12 @@ export default function BookRangePage({ mode = "practice" }) {
                 )}
 
                 <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <button type="button" onClick={loadWrongBooks} style={miniBtn} disabled={wrongLoading}>
+                  <button
+                    type="button"
+                    onClick={loadWrongBooks}
+                    style={miniBtn}
+                    disabled={wrongLoading}
+                  >
                     새로고침
                   </button>
                   <button
@@ -728,7 +735,11 @@ export default function BookRangePage({ mode = "practice" }) {
                               }}
                             >
                               <label style={{ fontWeight: 900, cursor: "pointer", color: COLORS.text }}>
-                                <input type="checkbox" checked={checked} onChange={() => toggleBook(book)} />{" "}
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleBook(book)}
+                                />{" "}
                                 {book}
                               </label>
 
@@ -768,6 +779,7 @@ export default function BookRangePage({ mode = "practice" }) {
                 )}
               </div>
 
+              {/* ✅ 분류 선택된 경우에만 "책 선택 + 챕터 범위" 표시 (기존 그대로) */}
               {selectedCategoryId && (
                 <>
                   <h3 style={{ marginTop: 16, color: COLORS.text }}>책 선택 + 챕터 범위</h3>
@@ -803,84 +815,91 @@ export default function BookRangePage({ mode = "practice" }) {
                       );
                     })}
                   </div>
-
-                  {/* 선택한 책 목록 */}
-                  <div style={{ ...panel, marginTop: 14, borderStyle: "dashed", borderColor: COLORS.pink2 }}>
-                    <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.text }}>
-                      선택한 책 목록{" "}
-                      <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
-                        ({selectedBookList.length}권)
-                      </span>
-                    </div>
-
-                    {selectedBookList.length === 0 ? (
-                      <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
-                        아직 선택된 책이 없어요. 위에서 책을 체크해 주세요.
-                      </div>
-                    ) : (
-                      <div style={{ display: "grid", gap: 10 }}>
-                        {selectedBookList.map((book) => (
-                          <div
-                            key={book}
-                            style={{
-                              border: `1px solid ${COLORS.border}`,
-                              borderRadius: 12,
-                              padding: 10,
-                              background: "rgba(255,255,255,0.45)",
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                gap: 10,
-                              }}
-                            >
-                              <div style={{ fontWeight: 900, color: COLORS.text }}>{book}</div>
-
-                              <button
-                                type="button"
-                                onClick={() => unselectBook(book)}
-                                style={{
-                                  padding: "6px 10px",
-                                  borderRadius: 10,
-                                  border: `1px solid ${COLORS.pink2}`,
-                                  background: "rgba(255,255,255,0.65)",
-                                  color: COLORS.danger,
-                                  fontWeight: 900,
-                                  cursor: "pointer",
-                                  whiteSpace: "nowrap",
-                                }}
-                                title="선택 해제"
-                              >
-                                선택 해제
-                              </button>
-                            </div>
-
-                            <div style={{ marginTop: 8 }}>
-                              <input
-                                style={fieldStyle}
-                                value={chaptersByBook[book] || ""}
-                                onChange={(e) =>
-                                  setChaptersByBook((m) => ({
-                                    ...m,
-                                    [book]: e.target.value,
-                                  }))
-                                }
-                                placeholder="예: 4-8, 10"
-                              />
-                              <div style={{ marginTop: 6, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
-                                여기서 범위를 수정하면 바로 반영돼요.
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
                 </>
               )}
+
+              {/* ✅✅ 선택한 책 목록을 분류 선택/책선택 영역 밖으로 이동 (항상 보임) */}
+              <div
+                style={{
+                  ...panel,
+                  marginTop: 14,
+                  borderStyle: "dashed",
+                  borderColor: COLORS.pink2,
+                }}
+              >
+                <div style={{ fontWeight: 900, marginBottom: 8, color: COLORS.text }}>
+                  선택한 책 목록{" "}
+                  <span style={{ fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
+                    ({selectedBookList.length}권)
+                  </span>
+                </div>
+
+                {selectedBookList.length === 0 ? (
+                  <div style={{ fontSize: 13, color: COLORS.sub, fontWeight: 800 }}>
+                    아직 선택된 책이 없어요. 위에서 책을 체크해 주세요.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {selectedBookList.map((book) => (
+                      <div
+                        key={book}
+                        style={{
+                          border: `1px solid ${COLORS.border}`,
+                          borderRadius: 12,
+                          padding: 10,
+                          background: "rgba(255,255,255,0.45)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ fontWeight: 900, color: COLORS.text }}>{book}</div>
+
+                          <button
+                            type="button"
+                            onClick={() => unselectBook(book)}
+                            style={{
+                              padding: "6px 10px",
+                              borderRadius: 10,
+                              border: `1px solid ${COLORS.pink2}`,
+                              background: "rgba(255,255,255,0.65)",
+                              color: COLORS.danger,
+                              fontWeight: 900,
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                            }}
+                            title="선택 해제"
+                          >
+                            선택 해제
+                          </button>
+                        </div>
+
+                        <div style={{ marginTop: 8 }}>
+                          <input
+                            style={fieldStyle}
+                            value={chaptersByBook[book] || ""}
+                            onChange={(e) =>
+                              setChaptersByBook((m) => ({
+                                ...m,
+                                [book]: e.target.value,
+                              }))
+                            }
+                            placeholder="예: 4-8, 10"
+                          />
+                          <div style={{ marginTop: 6, fontSize: 12, color: COLORS.sub, fontWeight: 800 }}>
+                            여기서 범위를 수정하면 바로 반영돼요.
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div style={{ marginTop: 20, display: "grid", gap: 10 }}>
                 {isOfficial ? (

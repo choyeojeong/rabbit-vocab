@@ -13,7 +13,8 @@ import { supabase } from "../../utils/supabaseClient";
  * - 기능 동일 유지
  *   - 최근 200개 로드, 새로고침
  *   - storage(csv_uploads/{batch.id}.csv) 다운로드
- *   - word_batches 행 삭제(확인 포함)
+ *   - ✅ 삭제 시: storage 파일 + word_batches 행 모두 삭제(완전 삭제)
+ *     (단, vocab_words는 그대로 남음)
  */
 
 export default function CsvBatchListPage() {
@@ -43,20 +44,54 @@ export default function CsvBatchListPage() {
     load();
   }, []);
 
-  async function handleDelete(id) {
+  async function handleDelete(batch) {
     if (
       !window.confirm(
-        "정말 이 배치를 삭제할까요?\n(이건 word_batches만 지웁니다. vocab_words는 그대로 남습니다.)"
+        "정말 이 배치를 완전 삭제할까요?\n\n" +
+          "- word_batches 기록 삭제\n" +
+          "- Storage(csv_uploads/배치ID.csv) 파일도 삭제\n\n" +
+          "※ vocab_words 단어 데이터는 그대로 남습니다."
       )
     ) {
       return;
     }
-    const { error } = await supabase.from("word_batches").delete().eq("id", id);
-    if (error) {
-      alert("삭제 실패: " + error.message);
-      return;
+
+    const id = batch?.id;
+    if (!id) return;
+
+    // ✅ UI가 두 번 눌리는 것 방지(간단하게 loading 사용)
+    setLoading(true);
+    setErr("");
+
+    try {
+      // 1) Storage 파일 삭제 (없어도 에러로 막지 않음)
+      const path = `${id}.csv`;
+      const { data: removed, error: storageErr } = await supabase.storage
+        .from("csv_uploads")
+        .remove([path]);
+
+      // remove는 "없음"도 에러로 내려오는 경우가 있어서, 완전 실패만 경고 처리
+      if (storageErr) {
+        // 그래도 DB 행 삭제는 진행(= 사용자가 원한 "기록 삭제" 우선)
+        console.warn("storage remove error:", storageErr.message);
+      } else {
+        // removed는 배열로 내려올 수 있음
+        // console.log("storage removed:", removed);
+      }
+
+      // 2) DB 행 삭제
+      const { error: dbErr } = await supabase.from("word_batches").delete().eq("id", id);
+      if (dbErr) {
+        throw new Error("삭제 실패(DB): " + dbErr.message);
+      }
+
+      // 3) UI 반영
+      setBatches((prev) => prev.filter((b) => b.id !== id));
+    } catch (e) {
+      alert("삭제 실패: " + (e?.message || String(e)));
+    } finally {
+      setLoading(false);
     }
-    setBatches((prev) => prev.filter((b) => b.id !== id));
   }
 
   async function handleDownloadCsv(batch) {
@@ -114,11 +149,13 @@ export default function CsvBatchListPage() {
           </div>
 
           <div style={styles.desc}>
-            여기서 삭제하면 <b style={{ color: styles._theme.text }}>word_batches 행만 삭제</b>되고, 이미{" "}
-            <code style={styles.code}>vocab_words</code>에 등록된 단어 데이터는 그대로 남습니다.
+            여기서 삭제하면 <b style={{ color: styles._theme.text }}>word_batches 기록 + Storage의 CSV 파일</b>이 함께
+            삭제되어 <b style={{ color: styles._theme.text }}>Supabase에 남는 배치 기록이 없습니다.</b>
             <br />
-            CsvManagePage에서 변환한 CSV를 <code style={styles.code}>csv_uploads/배치ID.csv</code>로 저장해둔 경우 이
-            화면에서 다시 내려받을 수 있습니다.
+            단, 이미 <code style={styles.code}>vocab_words</code>에 등록된 단어 데이터는 그대로 남습니다.
+            <br />
+            CSV는 <code style={styles.code}>csv_uploads/배치ID.csv</code>에 저장되어 있는 경우만 “CSV 받기”가
+            가능합니다.
           </div>
 
           {err && <div style={styles.error}>오류: {err}</div>}
@@ -172,7 +209,7 @@ export default function CsvBatchListPage() {
                           <button onClick={() => handleDownloadCsv(b)} style={styles.btnBlue}>
                             CSV 받기
                           </button>
-                          <button onClick={() => handleDelete(b.id)} style={styles.btnRed}>
+                          <button onClick={() => handleDelete(b)} style={styles.btnRed}>
                             삭제
                           </button>
                         </div>
@@ -185,9 +222,7 @@ export default function CsvBatchListPage() {
           </div>
 
           {/* ✅ 모바일 안내 (표 가로스크롤 유도) */}
-          <div style={styles.mobileHint}>
-            모바일에서는 표가 좌우로 스크롤됩니다. (←→)
-          </div>
+          <div style={styles.mobileHint}>모바일에서는 표가 좌우로 스크롤됩니다. (←→)</div>
         </div>
       </div>
     </div>
@@ -322,12 +357,12 @@ const styles = {
     width: "100%",
     borderCollapse: "separate",
     borderSpacing: 0,
-    minWidth: 920, // ✅ 모바일 가로 스크롤 자연스럽게
+    minWidth: 920,
   },
 
   th: {
     position: "sticky",
-    top: 0, // tableWrap 안에서 sticky
+    top: 0,
     background: "#fff",
     zIndex: 1,
     textAlign: "left",
