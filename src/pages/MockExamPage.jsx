@@ -336,8 +336,11 @@ export default function MockExamPage() {
   const answerRef = useRef('');
   const submittedRef = useRef(false);
   const [isComposing, setIsComposing] = useState(false);
-  const [inputKey, setInputKey] = useState(0);
-  const [remaining, setRemaining] = useState(6);
+
+  // ✅ 6초 → 7초로 변경
+  const QUESTION_SECONDS = 7;
+
+  const [remaining, setRemaining] = useState(QUESTION_SECONDS);
   const timerRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -431,21 +434,27 @@ export default function MockExamPage() {
     setAnswer('');
     answerRef.current = '';
     submittedRef.current = false;
-    setInputKey((k) => k + 1);
+
+    // ✅ iOS에서 다음 문제 자동입력 막힘 방지: blur/key 리마운트 제거 → 단순 focus만
     setTimeout(() => inputRef.current?.focus(), 50);
   }
 
   useEffect(() => {
     if (phase === 'exam') {
       submittedRef.current = false;
-      setInputKey((k) => k + 1);
       setIsComposing(false);
+      // ✅ 다음 문제에서 입력칸 포커스 유지가 원칙이지만,
+      // 혹시 포커스가 풀리는 케이스 대비로 "가볍게" 한 번 시도
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [phase, i]);
 
   useEffect(() => {
     if (phase !== 'exam') return;
-    setRemaining(6);
+
+    // ✅ 7초 타이머로 초기화
+    setRemaining(QUESTION_SECONDS);
+
     if (timerRef.current) clearInterval(timerRef.current);
 
     timerRef.current = setInterval(() => {
@@ -474,7 +483,7 @@ export default function MockExamPage() {
     submittedRef.current = true;
 
     setIsComposing(false);
-    inputRef.current?.blur();
+    // ✅ iOS 자동입력 문제 방지: blur 하지 않음
     if (timerRef.current) clearInterval(timerRef.current);
 
     const word = seq[i];
@@ -497,7 +506,8 @@ export default function MockExamPage() {
       setReviewOpen(false);
     } else {
       setI((x) => x + 1);
-      setTimeout(() => inputRef.current?.focus(), 50);
+      // ✅ 포커스 유지가 원칙이지만, 안전하게 한 번 더 시도(제스처 없이도 되는 범위에서)
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
   }
 
@@ -601,7 +611,6 @@ export default function MockExamPage() {
 
                 <div style={{ marginTop: 14 }}>
                   <input
-                    key={inputKey}
                     ref={inputRef}
                     style={styles.input}
                     placeholder="뜻을 입력하세요 (예: 달리다)"

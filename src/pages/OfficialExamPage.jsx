@@ -332,8 +332,11 @@ export default function OfficialExamPage() {
   const answerRef = useRef('');
   const submittedRef = useRef(false);
   const [isComposing, setIsComposing] = useState(false);
-  const [inputKey, setInputKey] = useState(0);
-  const [remaining, setRemaining] = useState(6);
+
+  // ✅ 6초 → 7초
+  const QUESTION_SECONDS = 7;
+
+  const [remaining, setRemaining] = useState(QUESTION_SECONDS);
   const timerRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -554,7 +557,8 @@ export default function OfficialExamPage() {
         chapter_end: bounds.chapter_end,
         num_questions: n,
         cutoff_miss: c,
-        duration_sec: 6,
+        // ✅ 6초 → 7초(세션 기록도 맞춤)
+        duration_sec: QUESTION_SECONDS,
         auto_score: 0,
         auto_pass: null,
       };
@@ -578,21 +582,26 @@ export default function OfficialExamPage() {
     setAnswer('');
     answerRef.current = '';
     submittedRef.current = false;
-    setInputKey((k) => k + 1);
+
+    // ✅ iOS 입력 끊김 방지: blur/key 리마운트 제거 + 시작 시 포커스
     setTimeout(() => inputRef.current?.focus(), 50);
   }
 
+  // ✅ 다음 문제에서 포커스 유지(혹시 풀리는 케이스 대비로 가볍게 재포커스)
   useEffect(() => {
     if (phase === 'exam') {
       submittedRef.current = false;
-      setInputKey((k) => k + 1);
       setIsComposing(false);
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [phase, i]);
 
+  // ✅ 타이머: 7초
   useEffect(() => {
     if (phase !== 'exam') return;
-    setRemaining(6);
+
+    setRemaining(QUESTION_SECONDS);
+
     if (timerRef.current) clearInterval(timerRef.current);
 
     timerRef.current = setInterval(() => {
@@ -636,7 +645,7 @@ export default function OfficialExamPage() {
     submittedRef.current = true;
 
     setIsComposing(false);
-    inputRef.current?.blur();
+    // ✅ iOS 입력 끊김 방지: blur 하지 않음
     if (timerRef.current) clearInterval(timerRef.current);
 
     const word = seq[i];
@@ -658,7 +667,8 @@ export default function OfficialExamPage() {
     if (i + 1 >= seq.length) finalizeAndSend(next);
     else {
       setI((x) => x + 1);
-      setTimeout(() => inputRef.current?.focus(), 50);
+      // ✅ 포커스는 유지가 원칙이지만, 안전하게 한 번 더
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
   }
 
@@ -840,7 +850,6 @@ export default function OfficialExamPage() {
 
                 <div style={{ marginTop: 14 }}>
                   <input
-                    key={inputKey}
                     ref={inputRef}
                     style={styles.input}
                     placeholder="뜻을 입력하세요 (예: 달리다)"
