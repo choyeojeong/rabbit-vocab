@@ -13,7 +13,7 @@ import {
 
 dayjs.locale("ko");
 
-const EXAM_SECONDS = 6;
+const DEFAULT_EXAM_SECONDS = 6;
 
 const THEME = {
   bg: "#f7f9fc",
@@ -35,7 +35,6 @@ const THEME = {
   dangerText: "#9f1239",
   yellowSoft: "#fff9e8",
   yellowBd: "#fde68a",
-  white: "#ffffff",
 };
 
 function normalizePhone(v) {
@@ -60,12 +59,28 @@ function buildPrettySourceBook(selections) {
     .filter(Boolean);
 
   if (!books.length) return "종이시험";
-
   if (books.length === 1) return books[0];
   if (books.length === 2) return `${books[0]} + ${books[1]}`;
   if (books.length === 3) return `${books[0]} + ${books[1]} + ${books[2]}`;
-
   return `${books[0]} 외 ${books.length - 1}권`;
+}
+
+function clampSeconds(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return DEFAULT_EXAM_SECONDS;
+  return Math.max(1, Math.min(60, Math.floor(n)));
+}
+
+function splitIntoColumns(items, columnCount = 3) {
+  const total = items.length;
+  const perCol = Math.ceil(total / columnCount);
+  const cols = [];
+  for (let c = 0; c < columnCount; c += 1) {
+    const start = c * perCol;
+    const end = start + perCol;
+    cols.push(items.slice(start, end));
+  }
+  return cols;
 }
 
 export default function AdminPaperExamPage() {
@@ -93,11 +108,12 @@ export default function AdminPaperExamPage() {
 
   const [numQ, setNumQ] = useState(30);
   const [cutMiss, setCutMiss] = useState(3);
+  const [examSeconds, setExamSeconds] = useState(DEFAULT_EXAM_SECONDS);
 
   const [words, setWords] = useState([]);
   const [seq, setSeq] = useState([]);
   const [idx, setIdx] = useState(0);
-  const [remaining, setRemaining] = useState(EXAM_SECONDS);
+  const [remaining, setRemaining] = useState(clampSeconds(DEFAULT_EXAM_SECONDS));
 
   const timerRef = useRef(null);
 
@@ -292,6 +308,10 @@ export default function AdminPaperExamPage() {
     return arr;
   }, [selectedBooks]);
 
+  const answerColumns = useMemo(() => {
+    return splitIntoColumns(seq, 3);
+  }, [seq]);
+
   async function toggleBook(book) {
     setSelectedBooks((prev) => {
       const next = new Set(prev);
@@ -403,6 +423,7 @@ export default function AdminPaperExamPage() {
 
       const count = Math.max(1, Math.min(Number(numQ) || 0, 999));
       const cut = Math.max(0, Math.min(Number(cutMiss) || 0, 999));
+      const sec = clampSeconds(examSeconds);
 
       setLoading(true);
 
@@ -414,6 +435,7 @@ export default function AdminPaperExamPage() {
 
       const finalCount = Math.min(count, loadedWords.length);
       if (finalCount !== Number(numQ)) setNumQ(finalCount);
+      if (sec !== Number(examSeconds)) setExamSeconds(sec);
 
       const chosen = sampleN(loadedWords, finalCount);
 
@@ -426,15 +448,15 @@ export default function AdminPaperExamPage() {
         chapters_text: chaptersText,
         cutoff_miss: cut,
         num_questions: finalCount,
-        exam_seconds: EXAM_SECONDS,
+        exam_seconds: sec,
         started_at: new Date().toISOString(),
       };
 
-      setPaperSession(sessionFront);
       setWords(loadedWords);
+      setPaperSession(sessionFront);
       setSeq(chosen);
       setIdx(0);
-      setRemaining(EXAM_SECONDS);
+      setRemaining(sec);
       setCheckedWrongIds(new Set());
       setPhase("exam");
     } catch (e) {
@@ -448,7 +470,8 @@ export default function AdminPaperExamPage() {
   useEffect(() => {
     if (phase !== "exam") return;
 
-    setRemaining(EXAM_SECONDS);
+    const seconds = clampSeconds(paperSession?.exam_seconds ?? examSeconds);
+    setRemaining(seconds);
 
     if (timerRef.current) clearInterval(timerRef.current);
 
@@ -460,7 +483,7 @@ export default function AdminPaperExamPage() {
           } else {
             setIdx((prev) => prev + 1);
           }
-          return EXAM_SECONDS;
+          return seconds;
         }
         return r - 1;
       });
@@ -469,8 +492,7 @@ export default function AdminPaperExamPage() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, idx, seq.length]);
+  }, [phase, idx, seq.length, paperSession?.exam_seconds, examSeconds]);
 
   function finishExam() {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -542,7 +564,7 @@ export default function AdminPaperExamPage() {
           chapter_end: chapterEnd,
           num_questions: seq.length,
           cutoff_miss: Math.max(0, Number(cutMiss) || 0),
-          duration_sec: EXAM_SECONDS,
+          duration_sec: clampSeconds(paperSession?.exam_seconds ?? examSeconds),
           auto_score: correctCount,
           auto_pass: willPass,
           final_score: correctCount,
@@ -561,7 +583,7 @@ export default function AdminPaperExamPage() {
         return {
           session_id: sessionId,
           order_index: index + 1,
-          question_type: "paper_admin",
+          question_type: "subjective",
           word_id: w.id || w.word_id || null,
           term_en: w.term_en || null,
           meaning_ko: w.meaning_ko || null,
@@ -626,7 +648,7 @@ export default function AdminPaperExamPage() {
     setWords([]);
     setSeq([]);
     setIdx(0);
-    setRemaining(EXAM_SECONDS);
+    setRemaining(clampSeconds(examSeconds));
     setCheckedWrongIds(new Set());
     setPaperSession(null);
   }
@@ -639,7 +661,7 @@ export default function AdminPaperExamPage() {
             <div>
               <div style={styles.title}>단어시험(종이시험)</div>
               <div style={styles.sub}>
-                관리자 화면으로 6초씩 단어를 보여주고, 채점 후 체크한 오답만 학생 계정으로 전송합니다.
+                관리자 화면으로 단어를 보여주고, 채점 후 체크한 오답만 학생 계정으로 전송합니다.
               </div>
             </div>
 
@@ -876,7 +898,7 @@ export default function AdminPaperExamPage() {
                   <div style={{ marginTop: 16 }}>
                     <div style={styles.label}>시험 설정</div>
                     <div style={styles.box}>
-                      <div style={styles.kvGrid}>
+                      <div style={styles.kvGrid3}>
                         <div>
                           <div style={styles.label}>문제 수</div>
                           <input
@@ -900,10 +922,22 @@ export default function AdminPaperExamPage() {
                             style={styles.input}
                           />
                         </div>
+
+                        <div>
+                          <div style={styles.label}>문항당 초</div>
+                          <input
+                            type="number"
+                            min={1}
+                            max={60}
+                            value={examSeconds}
+                            onChange={(e) => setExamSeconds(e.target.value)}
+                            style={styles.input}
+                          />
+                        </div>
                       </div>
 
                       <div style={styles.infoLine}>
-                        종이시험 표시 시간은 <b>문항당 6초</b>로 고정됩니다.
+                        선생님이 직접 문항당 시간을 설정할 수 있어요. 권장값은 <b>6초</b>입니다.
                       </div>
 
                       <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1041,63 +1075,52 @@ export default function AdminPaperExamPage() {
                 </div>
               </div>
 
-              <div style={styles.tableLike}>
-                <div style={{ ...styles.tableRow, ...styles.tableHead }}>
-                  <div style={{ ...styles.cellCheck, justifyContent: "center" }}>오답</div>
-                  <div style={styles.cellNo}>번호</div>
-                  <div style={styles.cellWord}>영단어</div>
-                  <div style={styles.cellMeaning}>해석</div>
-                </div>
+              <div style={styles.answerColumnsWrap}>
+                {answerColumns.map((colItems, colIdx) => (
+                  <div key={colIdx} style={styles.answerColumn}>
+                    <div style={styles.columnHead}>
+                      <div style={{ ...styles.colHeadCheck, justifyContent: "center" }}>오답</div>
+                      <div style={styles.colHeadNo}>번호</div>
+                      <div style={styles.colHeadWord}>영단어</div>
+                      <div style={styles.colHeadMeaning}>해석</div>
+                    </div>
 
-                {seq.map((w, index) => {
-                  const wordId = w.id || w.word_id;
-                  const checked = checkedWrongIds.has(wordId);
-                  return (
-                    <label
-                      key={`${wordId || index}-${index}`}
-                      className="_paper_exam_answer_row"
-                      style={{
-                        ...styles.tableRow,
-                        background: checked ? THEME.dangerSoft : "#fff",
-                        borderColor: checked ? THEME.dangerBd : THEME.border,
-                      }}
-                    >
-                      <div style={styles.cellCheck}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleWrongWord(wordId)}
-                        />
-                      </div>
-                      <div style={styles.cellNo}>{index + 1}</div>
-                      <div style={styles.cellWord}>{w.term_en || "-"}</div>
-                      <div style={styles.cellMeaning}>{w.meaning_ko || "-"}</div>
-                    </label>
-                  );
-                })}
+                    <div style={styles.columnRows}>
+                      {colItems.map((w, rowIdx) => {
+                        const globalIndex = colIdx * Math.ceil(seq.length / 3) + rowIdx;
+                        const wordId = w.id || w.word_id;
+                        const checked = checkedWrongIds.has(wordId);
+
+                        return (
+                          <label
+                            key={`${wordId || globalIndex}-${globalIndex}`}
+                            style={{
+                              ...styles.columnRow,
+                              background: checked ? THEME.dangerSoft : "#fff",
+                              borderColor: checked ? THEME.dangerBd : THEME.border,
+                            }}
+                          >
+                            <div style={styles.colCellCheck}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleWrongWord(wordId)}
+                              />
+                            </div>
+                            <div style={styles.colCellNo}>{globalIndex + 1}</div>
+                            <div style={styles.colCellWord}>{w.term_en || "-"}</div>
+                            <div style={styles.colCellMeaning}>{w.meaning_ko || "-"}</div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
         )}
       </div>
-
-      <style>{`
-        @media (max-width: 860px) {
-          ._paper_exam_grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
-
-        @media (max-width: 760px) {
-          ._paper_exam_answer_row {
-            grid-template-columns: 56px 56px 1fr !important;
-          }
-          ._paper_exam_answer_row > div:nth-child(4) {
-            grid-column: 1 / -1 !important;
-            padding-top: 4px;
-          }
-        }
-      `}</style>
     </div>
   );
 }
@@ -1289,9 +1312,9 @@ const styles = {
     flexWrap: "wrap",
   },
 
-  kvGrid: {
+  kvGrid3: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    gridTemplateColumns: "1fr 1fr 1fr",
     gap: 10,
   },
 
@@ -1473,64 +1496,107 @@ const styles = {
     marginTop: 14,
     border: `1px solid ${THEME.border}`,
     borderRadius: 16,
-    padding: 14,
+    padding: 12,
     background: "#fff",
   },
   answerSheetHead: {
     borderBottom: `1px solid ${THEME.border}`,
-    paddingBottom: 12,
-    marginBottom: 12,
+    paddingBottom: 8,
+    marginBottom: 10,
   },
   sheetTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 900,
     color: THEME.text,
+    lineHeight: 1.1,
   },
   sheetSub: {
-    marginTop: 4,
-    fontSize: 13,
+    marginTop: 3,
+    fontSize: 12,
     color: THEME.sub,
     fontWeight: 800,
-    lineHeight: 1.45,
+    lineHeight: 1.35,
   },
 
-  tableLike: {
+  answerColumnsWrap: {
     display: "grid",
+    gridTemplateColumns: "1fr 1fr 1fr",
     gap: 8,
+    alignItems: "start",
   },
-  tableRow: {
+  answerColumn: {
+    minWidth: 0,
+  },
+  columnHead: {
     display: "grid",
-    gridTemplateColumns: "74px 72px minmax(140px, 1.2fr) minmax(180px, 1fr)",
-    gap: 8,
+    gridTemplateColumns: "44px 42px minmax(70px, 0.8fr) minmax(90px, 1fr)",
+    gap: 4,
     alignItems: "center",
-    border: `1px solid ${THEME.border}`,
-    borderRadius: 12,
-    padding: 10,
-  },
-  tableHead: {
+    padding: "6px 8px",
+    borderRadius: 10,
+    border: `1px solid ${THEME.borderPink}`,
     background: THEME.pinkSoft,
-    borderColor: THEME.borderPink,
     fontWeight: 900,
+    color: THEME.text,
+    fontSize: 11,
+  },
+  columnRows: {
+    display: "grid",
+    gap: 4,
+    marginTop: 4,
+  },
+  columnRow: {
+    display: "grid",
+    gridTemplateColumns: "44px 42px minmax(70px, 0.8fr) minmax(90px, 1fr)",
+    gap: 4,
+    alignItems: "center",
+    padding: "5px 8px",
+    borderRadius: 10,
+    border: `1px solid ${THEME.border}`,
+    minHeight: 38,
   },
 
-  cellCheck: {
+  colHeadCheck: {
     display: "flex",
     alignItems: "center",
   },
-  cellNo: {
-    fontWeight: 900,
-    color: THEME.text,
+  colHeadNo: {
     textAlign: "center",
   },
-  cellWord: {
+  colHeadWord: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  colHeadMeaning: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  colCellCheck: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  colCellNo: {
+    textAlign: "center",
     fontWeight: 900,
     color: THEME.text,
+    fontSize: 12,
+  },
+  colCellWord: {
+    fontWeight: 900,
+    color: THEME.text,
+    fontSize: 11,
+    lineHeight: 1.15,
     wordBreak: "break-word",
   },
-  cellMeaning: {
+  colCellMeaning: {
     color: THEME.text,
     fontWeight: 800,
-    lineHeight: 1.45,
+    fontSize: 11,
+    lineHeight: 1.15,
     wordBreak: "break-word",
   },
 };
