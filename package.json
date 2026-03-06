@@ -12,6 +12,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "dayjs": "^1.11.18",
+    "html2canvas": "^1.4.1",
     "openai": "^6.7.0",
     "papaparse": "^5.5.3",
     "react": "^19.1.1",
