@@ -42,6 +42,9 @@ import AdminGate from "./pages/admin/AdminGate";
 // ✅ (추가) 관리자 오답노트(학생별/월별) 페이지
 import WrongBooksAdminPage from "./pages/admin/WrongBooksAdminPage";
 
+// ✅ (추가) 관리자 종이시험 페이지
+import AdminPaperExamPage from "./pages/admin/AdminPaperExamPage";
+
 // 학생 보호
 import { ensureLiveStudent, getSession } from "./utils/session";
 
@@ -279,6 +282,10 @@ export default function App() {
           {/* ✅ (추가) 오답노트(관리자) */}
           <Route path="/teacher/wrongs" element={<WrongBooksAdminPage />} />
           <Route path="/admin/wrongs" element={<WrongBooksAdminPage />} />
+
+          {/* ✅ (추가) 관리자 종이시험 */}
+          <Route path="/teacher/paper-exam" element={<AdminPaperExamPage />} />
+          <Route path="/admin/paper-exam" element={<AdminPaperExamPage />} />
 
           {/* admin alias */}
           <Route path="/admin/users" element={<TeacherManagePage />} />

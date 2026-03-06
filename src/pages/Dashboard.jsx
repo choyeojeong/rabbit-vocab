@@ -108,11 +108,20 @@ export default function Dashboard() {
                     오답노트(학생별)
                   </button>
 
+                  {/* ✅ 추가: 관리자 종이시험 */}
+                  <button
+                    className="student-button"
+                    onClick={() => navigate("/admin/paper-exam")}
+                  >
+                    단어시험(종이시험)
+                  </button>
+
                   {/* ✅ BookCategorizePage / BookCategoryManagePage 삭제했으므로 대시보드에서도 제거 */}
                 </div>
 
                 <div className="student-text" style={{ color: "#777", marginTop: 12 }}>
-                  관리자 모드에서는 학생관리/검수/모니터/CSV/오답노트 페이지로 바로 이동할 수 있어요.
+                  관리자 모드에서는 학생관리/검수/모니터/CSV/오답노트/종이시험 페이지로 바로 이동할 수
+                  있어요.
                 </div>
               </>
             ) : (
