@@ -53,6 +53,13 @@ function buildChaptersTextFromSelections(selections) {
     .join(" | ");
 }
 
+function buildRangeTextFromSelections(selections) {
+  return (selections || [])
+    .map((s) => String(s?.chaptersText || "").trim())
+    .filter(Boolean)
+    .join(" | ");
+}
+
 function buildPrettySourceBook(selections) {
   const books = (selections || [])
     .map((s) => String(s?.book || "").trim())
@@ -517,8 +524,6 @@ export default function AdminPaperExamPage() {
       clickGain.gain.exponentialRampToValueAtTime(0.028, now + 0.182);
       clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
 
-      noiseSource.connect(hp);
-      osc.connect(oscFilter);
       clickOsc.connect(clickGain);
       clickGain.connect(ctx.destination);
 
@@ -599,12 +604,14 @@ export default function AdminPaperExamPage() {
       const chosen = sampleN(loadedWords, finalCount);
 
       const chaptersText = buildChaptersTextFromSelections(selections);
+      const rangeText = buildRangeTextFromSelections(selections);
       const sessionFront = {
         student_id: studentPicked.id,
         student_name: studentPicked.name || "",
         teacher_name: studentPicked.teacher_name || null,
         book: buildPrettySourceBook(selections),
         chapters_text: chaptersText,
+        range_text: rangeText,
         cutoff_miss: cut,
         num_questions: finalCount,
         exam_seconds: sec,
@@ -1156,7 +1163,7 @@ export default function AdminPaperExamPage() {
                   학생: <b>{paperSession?.student_name || "-"}</b>
                 </div>
                 <div style={styles.examMetaSub}>{paperSession?.book || "-"}</div>
-                <div style={styles.examMetaSub}>{paperSession?.chapters_text || "-"}</div>
+                <div style={styles.examMetaSub}>{paperSession?.range_text || "-"}</div>
               </div>
 
               <div style={styles.examRight}>
@@ -1198,7 +1205,7 @@ export default function AdminPaperExamPage() {
                   총 문항 수: <b>{seq.length}</b>
                 </div>
                 <div>{paperSession?.book || "-"}</div>
-                <div>{paperSession?.chapters_text || "-"}</div>
+                <div>{paperSession?.range_text || "-"}</div>
               </div>
 
               <div style={styles.waitBtns}>
@@ -1271,7 +1278,7 @@ export default function AdminPaperExamPage() {
               <div>
                 시험 범위: <b>{paperSession?.book || "-"}</b>
               </div>
-              <div>{paperSession?.chapters_text || "-"}</div>
+              <div>{paperSession?.range_text || "-"}</div>
               <div>
                 총 {seq.length}문항 · 체크된 오답 {wrongCount}개 · 예상 결과{" "}
                 <b style={{ color: willPass ? THEME.okText : THEME.dangerText }}>
@@ -1286,10 +1293,8 @@ export default function AdminPaperExamPage() {
                 <div style={styles.sheetSub}>
                   {paperSession?.student_name || "-"} · {dayjs().format("YYYY.MM.DD HH:mm")}
                 </div>
-                <div style={styles.sheetSub}>
-                  {paperSession?.book || "-"}
-                  {paperSession?.chapters_text ? ` · ${paperSession.chapters_text}` : ""}
-                </div>
+                <div style={styles.sheetSub}>{paperSession?.book || "-"}</div>
+                <div style={styles.sheetSub}>{paperSession?.range_text || "-"}</div>
               </div>
 
               <div style={styles.answerColumnsWrap}>
