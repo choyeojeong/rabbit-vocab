@@ -84,7 +84,7 @@ function splitIntoColumns(items, columnCount = 3) {
 }
 
 export default function AdminPaperExamPage() {
-  const [phase, setPhase] = useState("config"); // config | exam | answer
+  const [phase, setPhase] = useState("config"); // config | exam | waitingAnswer | answer
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -116,6 +116,8 @@ export default function AdminPaperExamPage() {
   const [remaining, setRemaining] = useState(clampSeconds(DEFAULT_EXAM_SECONDS));
 
   const timerRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const voicesLoadedRef = useRef(false);
 
   const [paperSession, setPaperSession] = useState(null);
   const [checkedWrongIds, setCheckedWrongIds] = useState(() => new Set());
@@ -123,6 +125,24 @@ export default function AdminPaperExamPage() {
 
   useEffect(() => {
     loadBooksAndCategories();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+
+    const synth = window.speechSynthesis;
+    const handleVoicesChanged = () => {
+      voicesLoadedRef.current = true;
+      synth.getVoices();
+    };
+
+    handleVoicesChanged();
+    synth.addEventListener?.("voiceschanged", handleVoicesChanged);
+
+    return () => {
+      synth.cancel();
+      synth.removeEventListener?.("voiceschanged", handleVoicesChanged);
+    };
   }, []);
 
   async function loadBooksAndCategories() {
@@ -409,6 +429,93 @@ export default function AdminPaperExamPage() {
     return chunks;
   }
 
+  function ensureAudioContext() {
+    if (typeof window === "undefined") return null;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new AudioCtx();
+    }
+    if (audioCtxRef.current.state === "suspended") {
+      audioCtxRef.current.resume().catch(() => {});
+    }
+    return audioCtxRef.current;
+  }
+
+  function playPageFlipSound() {
+    try {
+      const ctx = ensureAudioContext();
+      if (!ctx) return;
+
+      const duration = 0.2;
+      const bufferSize = Math.floor(ctx.sampleRate * duration);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+
+      for (let i = 0; i < bufferSize; i += 1) {
+        const t = i / bufferSize;
+        const envelope = Math.pow(1 - t, 1.8);
+        data[i] = (Math.random() * 2 - 1) * envelope * 0.18;
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+
+      const bandpass = ctx.createBiquadFilter();
+      bandpass.type = "bandpass";
+      bandpass.frequency.value = 1400;
+      bandpass.Q.value = 0.7;
+
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = "highpass";
+      highpass.frequency.value = 500;
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+
+      source.connect(bandpass);
+      bandpass.connect(highpass);
+      highpass.connect(gain);
+      gain.connect(ctx.destination);
+
+      source.start();
+      source.stop(ctx.currentTime + duration);
+    } catch (e) {
+      console.warn("[page flip sound error]", e);
+    }
+  }
+
+  function speakWord(text) {
+    try {
+      if (typeof window === "undefined" || !window.speechSynthesis) return;
+      const word = String(text || "").trim();
+      if (!word) return;
+
+      const synth = window.speechSynthesis;
+      synth.cancel();
+
+      const utter = new SpeechSynthesisUtterance(word);
+      utter.lang = "en-US";
+      utter.rate = 0.9;
+      utter.pitch = 1.0;
+      utter.volume = 1.0;
+
+      const voices = synth.getVoices?.() || [];
+      const preferred =
+        voices.find((v) => /en-US/i.test(v.lang) && /Google|Samantha|Microsoft|Daniel|Karen/i.test(v.name)) ||
+        voices.find((v) => /en-US/i.test(v.lang)) ||
+        voices.find((v) => /^en/i.test(v.lang));
+
+      if (preferred) utter.voice = preferred;
+
+      synth.speak(utter);
+    } catch (e) {
+      console.warn("[speech error]", e);
+    }
+  }
+
   async function startExam() {
     try {
       setErr("");
@@ -452,6 +559,8 @@ export default function AdminPaperExamPage() {
         started_at: new Date().toISOString(),
       };
 
+      ensureAudioContext();
+
       setWords(loadedWords);
       setPaperSession(sessionFront);
       setSeq(chosen);
@@ -466,6 +575,16 @@ export default function AdminPaperExamPage() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (phase !== "exam") return;
+
+    const currentWord = seq[idx]?.term_en || "";
+    if (!currentWord) return;
+
+    playPageFlipSound();
+    speakWord(currentWord);
+  }, [phase, idx, seq]);
 
   useEffect(() => {
     if (phase !== "exam") return;
@@ -497,6 +616,16 @@ export default function AdminPaperExamPage() {
   function finishExam() {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setPhase("waitingAnswer");
+  }
+
+  function openAnswerSheet() {
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     setPhase("answer");
   }
 
@@ -644,6 +773,9 @@ export default function AdminPaperExamPage() {
   function resetAll() {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
     setPhase("config");
     setWords([]);
     setSeq([]);
@@ -986,12 +1118,46 @@ export default function AdminPaperExamPage() {
             <div style={styles.examCard}>
               <div style={styles.examWord}>{seq[idx]?.term_en || ""}</div>
               <div style={styles.examHint}>학생들은 종이에 뜻을 적으세요</div>
+              <div style={styles.examHintSub}>단어가 바뀔 때 발음과 효과음이 함께 나옵니다</div>
             </div>
 
             <div style={styles.examBottomBtns}>
               <button type="button" style={styles.ghostBtnPill} onClick={finishExam}>
-                채점 화면으로 이동
+                시험 종료
               </button>
+            </div>
+          </div>
+        )}
+
+        {phase === "waitingAnswer" && (
+          <div style={styles.waitWrap}>
+            <div style={styles.waitCard}>
+              <div style={styles.waitTitle}>시험이 끝났습니다</div>
+              <div style={styles.waitSub}>
+                학생이 답을 다시 확인할 시간을 준 뒤,
+                <br />
+                아래 <b>정답보기</b> 버튼을 눌러 답지 화면으로 넘어가세요.
+              </div>
+
+              <div style={styles.waitInfoBox}>
+                <div>
+                  학생: <b>{paperSession?.student_name || "-"}</b>
+                </div>
+                <div>
+                  총 문항 수: <b>{seq.length}</b>
+                </div>
+                <div>{paperSession?.book || "-"}</div>
+                <div>{paperSession?.chapters_text || "-"}</div>
+              </div>
+
+              <div style={styles.waitBtns}>
+                <button type="button" style={styles.pinkBtn} onClick={openAnswerSheet}>
+                  정답보기
+                </button>
+                <button type="button" style={styles.ghostBtnPill} onClick={resetAll}>
+                  시험 취소 / 처음으로
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1458,8 +1624,61 @@ const styles = {
     color: THEME.sub,
     fontWeight: 800,
   },
+  examHintSub: {
+    marginTop: 8,
+    fontSize: 13,
+    color: THEME.sub,
+    fontWeight: 800,
+  },
 
   examBottomBtns: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+
+  waitWrap: {
+    minHeight: "calc(100dvh - 180px)",
+    display: "grid",
+    placeItems: "center",
+  },
+  waitCard: {
+    width: "100%",
+    maxWidth: 760,
+    background: "#fff",
+    border: `1px solid ${THEME.borderPink}`,
+    borderRadius: 24,
+    padding: 28,
+    boxShadow: "0 18px 40px rgba(255,111,163,.10)",
+    textAlign: "center",
+  },
+  waitTitle: {
+    fontSize: 34,
+    fontWeight: 900,
+    color: THEME.text,
+    lineHeight: 1.2,
+  },
+  waitSub: {
+    marginTop: 12,
+    fontSize: 16,
+    color: THEME.sub,
+    fontWeight: 800,
+    lineHeight: 1.7,
+  },
+  waitInfoBox: {
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 14,
+    background: THEME.yellowSoft,
+    border: `1px solid ${THEME.yellowBd}`,
+    fontSize: 14,
+    color: THEME.text,
+    fontWeight: 800,
+    lineHeight: 1.7,
+  },
+  waitBtns: {
+    marginTop: 18,
     display: "flex",
     justifyContent: "center",
     gap: 10,
