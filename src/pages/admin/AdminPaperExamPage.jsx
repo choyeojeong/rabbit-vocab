@@ -447,41 +447,89 @@ export default function AdminPaperExamPage() {
       const ctx = ensureAudioContext();
       if (!ctx) return;
 
-      const duration = 0.2;
-      const bufferSize = Math.floor(ctx.sampleRate * duration);
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
+      const now = ctx.currentTime;
+      const totalDuration = 0.42;
 
-      for (let i = 0; i < bufferSize; i += 1) {
-        const t = i / bufferSize;
-        const envelope = Math.pow(1 - t, 1.8);
-        data[i] = (Math.random() * 2 - 1) * envelope * 0.18;
+      const noiseBufferSize = Math.floor(ctx.sampleRate * totalDuration);
+      const noiseBuffer = ctx.createBuffer(1, noiseBufferSize, ctx.sampleRate);
+      const noiseData = noiseBuffer.getChannelData(0);
+
+      for (let i = 0; i < noiseBufferSize; i += 1) {
+        const t = i / noiseBufferSize;
+        const env =
+          Math.pow(1 - t, 1.15) * (0.72 + 0.28 * Math.sin(t * Math.PI * 5));
+        noiseData[i] = (Math.random() * 2 - 1) * env * 0.42;
       }
 
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
+      const noiseSource = ctx.createBufferSource();
+      noiseSource.buffer = noiseBuffer;
 
-      const bandpass = ctx.createBiquadFilter();
-      bandpass.type = "bandpass";
-      bandpass.frequency.value = 1400;
-      bandpass.Q.value = 0.7;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 650;
 
-      const highpass = ctx.createBiquadFilter();
-      highpass.type = "highpass";
-      highpass.frequency.value = 500;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 1500;
+      bp.Q.value = 0.9;
 
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 4200;
 
-      source.connect(bandpass);
-      bandpass.connect(highpass);
-      highpass.connect(gain);
-      gain.connect(ctx.destination);
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.0001, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.34, now + 0.018);
+      noiseGain.gain.exponentialRampToValueAtTime(0.18, now + 0.12);
+      noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + totalDuration);
 
-      source.start();
-      source.stop(ctx.currentTime + duration);
+      noiseSource.connect(hp);
+      hp.connect(bp);
+      bp.connect(lp);
+      lp.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+
+      const osc = ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(420, now);
+      osc.frequency.exponentialRampToValueAtTime(150, now + 0.16);
+
+      const oscFilter = ctx.createBiquadFilter();
+      oscFilter.type = "lowpass";
+      oscFilter.frequency.setValueAtTime(1200, now);
+
+      const oscGain = ctx.createGain();
+      oscGain.gain.setValueAtTime(0.0001, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.06, now + 0.012);
+      oscGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+
+      osc.connect(oscFilter);
+      oscFilter.connect(oscGain);
+      oscGain.connect(ctx.destination);
+
+      const clickOsc = ctx.createOscillator();
+      clickOsc.type = "square";
+      clickOsc.frequency.setValueAtTime(900, now + 0.17);
+      clickOsc.frequency.exponentialRampToValueAtTime(420, now + 0.22);
+
+      const clickGain = ctx.createGain();
+      clickGain.gain.setValueAtTime(0.0001, now + 0.17);
+      clickGain.gain.exponentialRampToValueAtTime(0.028, now + 0.182);
+      clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+
+      noiseSource.connect(hp);
+      osc.connect(oscFilter);
+      clickOsc.connect(clickGain);
+      clickGain.connect(ctx.destination);
+
+      noiseSource.start(now);
+      noiseSource.stop(now + totalDuration);
+
+      osc.start(now);
+      osc.stop(now + 0.18);
+
+      clickOsc.start(now + 0.17);
+      clickOsc.stop(now + 0.24);
     } catch (e) {
       console.warn("[page flip sound error]", e);
     }
@@ -504,7 +552,11 @@ export default function AdminPaperExamPage() {
 
       const voices = synth.getVoices?.() || [];
       const preferred =
-        voices.find((v) => /en-US/i.test(v.lang) && /Google|Samantha|Microsoft|Daniel|Karen/i.test(v.name)) ||
+        voices.find(
+          (v) =>
+            /en-US/i.test(v.lang) &&
+            /Google|Samantha|Microsoft|Daniel|Karen/i.test(v.name)
+        ) ||
         voices.find((v) => /en-US/i.test(v.lang)) ||
         voices.find((v) => /^en/i.test(v.lang));
 
@@ -1118,7 +1170,6 @@ export default function AdminPaperExamPage() {
             <div style={styles.examCard}>
               <div style={styles.examWord}>{seq[idx]?.term_en || ""}</div>
               <div style={styles.examHint}>학생들은 종이에 뜻을 적으세요</div>
-              <div style={styles.examHintSub}>단어가 바뀔 때 발음과 효과음이 함께 나옵니다</div>
             </div>
 
             <div style={styles.examBottomBtns}>
@@ -1621,12 +1672,6 @@ const styles = {
   examHint: {
     marginTop: 14,
     fontSize: 18,
-    color: THEME.sub,
-    fontWeight: 800,
-  },
-  examHintSub: {
-    marginTop: 8,
-    fontSize: 13,
     color: THEME.sub,
     fontWeight: 800,
   },
