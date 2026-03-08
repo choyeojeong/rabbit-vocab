@@ -93,14 +93,24 @@ export default function OfficialResultList() {
   }, [fetchRows]);
 
   const decorated = useMemo(() => {
-    return (rows || []).map((r) => {
-      const range = r.chapters_text || `${r.chapter_start ?? "?"}-${r.chapter_end ?? "?"}`;
-      const numQ = r.num_questions ?? 0;
-      const score = r.final_score ?? 0;
-      const wrong = Math.max(0, numQ - score);
-      const dateStr = dayjs(r.teacher_confirmed_at || r.created_at).format("YYYY.MM.DD");
-      return { ...r, _range: range, _numQ: numQ, _wrong: wrong, _dateStr: dateStr };
-    });
+    return [...(rows || [])]
+      .map((r) => {
+        const range = r.chapters_text || `${r.chapter_start ?? "?"}-${r.chapter_end ?? "?"}`;
+        const numQ = r.num_questions ?? 0;
+        const score = r.final_score ?? 0;
+        const wrong = Math.max(0, numQ - score);
+        const sortTs = dayjs(r.teacher_confirmed_at || r.created_at).valueOf();
+        const dateStr = dayjs(r.teacher_confirmed_at || r.created_at).format("YYYY.MM.DD");
+        return {
+          ...r,
+          _range: range,
+          _numQ: numQ,
+          _wrong: wrong,
+          _dateStr: dateStr,
+          _sortTs: sortTs,
+        };
+      })
+      .sort((a, b) => b._sortTs - a._sortTs); // ✅ 최신순 정렬
   }, [rows]);
 
   const counts = useMemo(() => {
@@ -117,7 +127,6 @@ export default function OfficialResultList() {
   }, [decorated, tab]);
 
   const styles = {
-    // ✅ 화면 전체 사용 (네모 카드/패널 없음)
     page: {
       minHeight: "100dvh",
       width: "100%",
@@ -134,7 +143,6 @@ export default function OfficialResultList() {
       margin: "0 auto",
     },
 
-    // 상단 헤더
     header: {
       display: "flex",
       alignItems: "flex-start",
@@ -157,7 +165,6 @@ export default function OfficialResultList() {
       boxShadow: "0 10px 18px rgba(31,42,68,0.06)",
     },
 
-    // Tabs
     tabsWrap: {
       marginTop: 8,
       border: `1px solid ${COLORS.border}`,
@@ -183,7 +190,6 @@ export default function OfficialResultList() {
     }),
     tabSmall: { fontWeight: 900, opacity: 0.9, marginLeft: 6, fontSize: 12 },
 
-    // 리스트(표 대신)
     list: { marginTop: 12, display: "grid", gap: 10 },
 
     rowCard: {
@@ -290,7 +296,6 @@ export default function OfficialResultList() {
       textDecoration: "none",
     },
 
-    // 로그인 필요 화면도 카드 느낌만 최소
     authBox: {
       marginTop: 12,
       padding: 12,
@@ -314,7 +319,6 @@ export default function OfficialResultList() {
     },
   };
 
-  // 비로그인
   if (!who.id && !who.name) {
     return (
       <StudentShell>
@@ -348,7 +352,6 @@ export default function OfficialResultList() {
     <StudentShell>
       <div style={styles.page}>
         <div style={styles.container}>
-          {/* Header */}
           <div style={styles.header}>
             <div>
               <h2 style={styles.title}>공식시험 결과</h2>
@@ -360,7 +363,6 @@ export default function OfficialResultList() {
             </button>
           </div>
 
-          {/* Tabs */}
           <div style={styles.tabsWrap} aria-label="결과 필터 탭">
             <button type="button" style={styles.tabBtn(tab === "all")} onClick={() => setTab("all")}>
               전체 <span style={styles.tabSmall}>{counts.total}</span>
@@ -406,8 +408,6 @@ export default function OfficialResultList() {
                     <div style={styles.left}>
                       <div style={styles.topLine}>
                         <div style={styles.date}>{r._dateStr}</div>
-
-                        {/* ✅ 통과/불통과만 표시 (점/숫자 제거) */}
                         <span style={styles.badge(ok)}>{ok ? "통과" : "불통과"}</span>
                       </div>
 
@@ -423,12 +423,9 @@ export default function OfficialResultList() {
                           <span style={styles.chipSub}>문제수</span> {r._numQ}문제
                         </span>
 
-                        {/* ✅ 필요하면 틀린 수는 여기서만 보여주고, 배지 옆 숫자는 안 보여줌 */}
                         <span style={styles.chip}>
                           <span style={styles.chipSub}>틀린 수</span> -{r._wrong}
                         </span>
-
-                        {/* ✅ 상태(검수 확정) 칩 제거 */}
                       </div>
                     </div>
 
