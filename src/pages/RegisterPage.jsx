@@ -169,7 +169,7 @@ export default function RegisterPage() {
 
         <div style={styles.row}>
           <label style={styles.label}>담당 선생님 성함 *</label>
-          <input style={styles.input} placeholder="예: 여정T" value={teacherName} onChange={(e) => setTeacherName(e.target.value)} />
+          <input style={styles.input} value={teacherName} onChange={(e) => setTeacherName(e.target.value)} />
         </div>
 
         {err && <div style={styles.error}>{err}</div>}
